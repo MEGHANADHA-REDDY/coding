@@ -3,6 +3,8 @@ const Exam = require('../models/Exam');
 const ExamSession = require('../models/ExamSession');
 const Violation = require('../models/Violation');
 const Submission = require('../models/Submission');
+const Quiz = require('../models/Quiz');
+const QuizSubmission = require('../models/QuizSubmission');
 
 exports.getAvailableExams = async (req, res) => {
   try {
@@ -13,7 +15,7 @@ exports.getAvailableExams = async (req, res) => {
       startTime: { $lte: now },
       endTime: { $gte: now },
     })
-      .select('title startTime endTime maxViolations')
+      .select('title startTime endTime maxViolations problems quizzes')
       .sort({ startTime: 1 });
 
     const examsWithSession = await Promise.all(
@@ -82,10 +84,9 @@ exports.getExamProblems = async (req, res) => {
     const { examId } = req.params;
     const studentId = req.user.id;
 
-    const exam = await Exam.findById(examId).populate(
-      'problems',
-      'title description constraints difficulty sampleTestCases'
-    );
+    const exam = await Exam.findById(examId)
+      .populate('problems', 'title description constraints difficulty sampleTestCases')
+      .populate('quizzes', 'title description questions');
 
     if (!exam) {
       return res.status(404).json({ error: 'Exam not found.' });
@@ -104,6 +105,21 @@ exports.getExamProblems = async (req, res) => {
       return res.status(403).json({ error: 'Exam already submitted.' });
     }
 
+    const quizzesForStudent = (exam.quizzes || []).map((quiz) => ({
+      _id: quiz._id,
+      title: quiz.title,
+      description: quiz.description,
+      questions: quiz.questions.map((q) => ({
+        _id: q._id,
+        questionText: q.questionText,
+        options: q.options,
+        score: q.score,
+      })),
+    }));
+
+    const existingQuizSubs = await QuizSubmission.find({ examId, studentId })
+      .select('quizId answers score maxScore');
+
     res.json({
       exam: {
         _id: exam._id,
@@ -113,6 +129,8 @@ exports.getExamProblems = async (req, res) => {
         maxViolations: exam.maxViolations,
       },
       problems: exam.problems,
+      quizzes: quizzesForStudent,
+      quizSubmissions: existingQuizSubs,
       session: {
         violationCount: session.violationCount,
         isSubmitted: session.isSubmitted,
@@ -166,6 +184,95 @@ exports.reportViolation = async (req, res) => {
   } catch (error) {
     console.error('Report violation error:', error);
     res.status(500).json({ error: 'Failed to report violation.' });
+  }
+};
+
+exports.submitQuiz = async (req, res) => {
+  try {
+    const { examId } = req.params;
+    const studentId = req.user.id;
+    const { quizId, answers } = req.body;
+
+    const exam = await Exam.findById(examId);
+    if (!exam || !exam.isActive) {
+      return res.status(404).json({ error: 'Exam not found or not active.' });
+    }
+
+    const now = new Date();
+    if (now < exam.startTime || now > exam.endTime) {
+      return res.status(403).json({ error: 'Exam is not within the valid time window.' });
+    }
+
+    if (!exam.allowedStudents.map((id) => id.toString()).includes(studentId)) {
+      return res.status(403).json({ error: 'You are not allowed to submit to this exam.' });
+    }
+
+    if (!exam.quizzes.map((id) => id.toString()).includes(quizId)) {
+      return res.status(400).json({ error: 'Quiz does not belong to this exam.' });
+    }
+
+    const session = await ExamSession.findOne({ examId, studentId });
+    if (!session) {
+      return res.status(403).json({ error: 'You must start the exam first.' });
+    }
+    if (session.isSubmitted) {
+      return res.status(403).json({ error: 'Exam already submitted. Cannot submit quiz.' });
+    }
+
+    const quiz = await Quiz.findById(quizId);
+    if (!quiz) {
+      return res.status(404).json({ error: 'Quiz not found.' });
+    }
+
+    let earnedScore = 0;
+    let correctCount = 0;
+    const maxScore = quiz.questions.reduce((sum, q) => sum + (q.score || 1), 0);
+
+    const gradedAnswers = (answers || []).map((ans) => {
+      const question = quiz.questions.id(ans.questionId);
+      if (question && ans.selectedOption === question.correctOption) {
+        earnedScore += question.score || 1;
+        correctCount++;
+      }
+      return { questionId: ans.questionId, selectedOption: ans.selectedOption };
+    });
+
+    const existing = await QuizSubmission.findOne({ examId, quizId, studentId });
+    let quizSubmission;
+
+    if (existing) {
+      existing.answers = gradedAnswers;
+      existing.score = earnedScore;
+      existing.maxScore = maxScore;
+      existing.correctCount = correctCount;
+      existing.totalQuestions = quiz.questions.length;
+      quizSubmission = await existing.save();
+    } else {
+      quizSubmission = await QuizSubmission.create({
+        examId,
+        quizId,
+        studentId,
+        answers: gradedAnswers,
+        score: earnedScore,
+        maxScore,
+        correctCount,
+        totalQuestions: quiz.questions.length,
+      });
+    }
+
+    res.json({
+      quizSubmission: {
+        _id: quizSubmission._id,
+        quizId: quizSubmission.quizId,
+        score: quizSubmission.score,
+        maxScore: quizSubmission.maxScore,
+        correctCount: quizSubmission.correctCount,
+        totalQuestions: quizSubmission.totalQuestions,
+      },
+    });
+  } catch (error) {
+    console.error('Submit quiz error:', error);
+    res.status(500).json({ error: 'Failed to submit quiz.' });
   }
 };
 

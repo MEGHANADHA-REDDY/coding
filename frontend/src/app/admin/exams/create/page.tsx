@@ -13,6 +13,12 @@ interface Problem {
   difficulty: string;
 }
 
+interface QuizItem {
+  _id: string;
+  title: string;
+  questions: { score: number }[];
+}
+
 interface Student {
   _id: string;
   name: string;
@@ -27,19 +33,23 @@ export default function CreateExamPage() {
   const [endTime, setEndTime] = useState('');
   const [maxViolations, setMaxViolations] = useState(3);
   const [selectedProblems, setSelectedProblems] = useState<string[]>([]);
+  const [selectedQuizzes, setSelectedQuizzes] = useState<string[]>([]);
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
   const [problems, setProblems] = useState<Problem[]>([]);
+  const [quizzes, setQuizzes] = useState<QuizItem[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [probRes, studRes] = await Promise.all([
+        const [probRes, quizRes, studRes] = await Promise.all([
           api.get('/admin/problems'),
+          api.get('/admin/quizzes'),
           api.get('/admin/students'),
         ]);
         setProblems(probRes.data.problems);
+        setQuizzes(quizRes.data.quizzes);
         setStudents(studRes.data.students);
       } catch {
         toast.error('Failed to load data');
@@ -54,7 +64,9 @@ export default function CreateExamPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (selectedProblems.length === 0) return toast.error('Select at least one problem');
+    if (selectedProblems.length === 0 && selectedQuizzes.length === 0) {
+      return toast.error('Select at least one problem or quiz');
+    }
     if (selectedStudents.length === 0) return toast.error('Select at least one student');
 
     setSubmitting(true);
@@ -64,6 +76,7 @@ export default function CreateExamPage() {
         startTime: new Date(startTime).toISOString(),
         endTime: new Date(endTime).toISOString(),
         problems: selectedProblems,
+        quizzes: selectedQuizzes,
         allowedStudents: selectedStudents,
         maxViolations,
       });
@@ -76,6 +89,9 @@ export default function CreateExamPage() {
       setSubmitting(false);
     }
   };
+
+  const getQuizPoints = (quiz: QuizItem) =>
+    quiz.questions.reduce((s, q) => s + (q.score || 1), 0);
 
   return (
     <div className="max-w-3xl">
@@ -133,7 +149,7 @@ export default function CreateExamPage() {
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Select Problems ({selectedProblems.length} selected)
+            Coding Problems ({selectedProblems.length} selected)
           </label>
           <div className="border border-gray-200 rounded-xl max-h-48 overflow-y-auto p-2 space-y-1">
             {problems.map((p) => (
@@ -150,6 +166,31 @@ export default function CreateExamPage() {
             ))}
             {problems.length === 0 && (
               <p className="text-sm text-gray-400 p-2">No problems available. Create some first.</p>
+            )}
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            MCQ Quizzes ({selectedQuizzes.length} selected)
+          </label>
+          <div className="border border-gray-200 rounded-xl max-h-48 overflow-y-auto p-2 space-y-1">
+            {quizzes.map((q) => (
+              <label key={q._id} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-50 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={selectedQuizzes.includes(q._id)}
+                  onChange={() => toggleItem(q._id, selectedQuizzes, setSelectedQuizzes)}
+                  className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                <span className="text-sm text-gray-700">{q.title}</span>
+                <span className="text-xs text-gray-400">
+                  ({q.questions.length} Qs, {getQuizPoints(q)} pts)
+                </span>
+              </label>
+            ))}
+            {quizzes.length === 0 && (
+              <p className="text-sm text-gray-400 p-2">No quizzes available. Create some first.</p>
             )}
           </div>
         </div>

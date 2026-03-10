@@ -23,8 +23,13 @@ exports.validateExam = [
   body('startTime').isISO8601().withMessage('Valid start time is required'),
   body('endTime').isISO8601().withMessage('Valid end time is required'),
   body('problems')
-    .isArray({ min: 1 })
-    .withMessage('At least one problem is required'),
+    .optional()
+    .isArray()
+    .withMessage('Problems must be an array'),
+  body('quizzes')
+    .optional()
+    .isArray()
+    .withMessage('Quizzes must be an array'),
   body('allowedStudents')
     .isArray({ min: 1 })
     .withMessage('At least one student must be allowed'),

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
-import { Clock, PlayCircle, CheckCircle, ClipboardList } from 'lucide-react';
+import { Clock, PlayCircle, CheckCircle, ClipboardList, FileCode, CircleDot } from 'lucide-react';
 
 interface Exam {
   _id: string;
@@ -12,6 +12,8 @@ interface Exam {
   startTime: string;
   endTime: string;
   maxViolations: number;
+  problems: string[];
+  quizzes: string[];
   hasStarted: boolean;
   isSubmitted: boolean;
 }
@@ -70,41 +72,59 @@ export default function StudentDashboard() {
         </div>
       ) : (
         <div className="space-y-4">
-          {exams.map((exam) => (
-            <div key={exam._id} className="bg-white rounded-xl border border-gray-100 p-6 hover:shadow-md transition-shadow">
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <h3 className="font-semibold text-gray-900 text-lg">{exam.title}</h3>
-                  <div className="flex items-center gap-4 mt-2 text-sm text-gray-500">
-                    <span className="flex items-center gap-1">
-                      <Clock className="w-4 h-4" />
-                      {getTimeRemaining(exam.endTime)}
-                    </span>
-                    <span>Max warnings: {exam.maxViolations}</span>
+          {exams.map((exam) => {
+            const problemCount = exam.problems?.length || 0;
+            const quizCount = exam.quizzes?.length || 0;
+            return (
+              <div key={exam._id} className="bg-white rounded-xl border border-gray-100 p-6 hover:shadow-md transition-shadow">
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-gray-900 text-lg">{exam.title}</h3>
+                    <div className="flex items-center gap-3 mt-2">
+                      {problemCount > 0 && (
+                        <span className="flex items-center gap-1.5 text-xs font-medium bg-blue-50 text-blue-700 px-2.5 py-1 rounded-lg">
+                          <FileCode className="w-3.5 h-3.5" />
+                          {problemCount} Coding Problem{problemCount !== 1 ? 's' : ''}
+                        </span>
+                      )}
+                      {quizCount > 0 && (
+                        <span className="flex items-center gap-1.5 text-xs font-medium bg-purple-50 text-purple-700 px-2.5 py-1 rounded-lg">
+                          <CircleDot className="w-3.5 h-3.5" />
+                          {quizCount} Quiz{quizCount !== 1 ? 'zes' : ''}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-4 mt-2 text-sm text-gray-500">
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-4 h-4" />
+                        {getTimeRemaining(exam.endTime)}
+                      </span>
+                      <span>Max warnings: {exam.maxViolations}</span>
+                    </div>
+                    <div className="text-xs text-gray-400 mt-1">
+                      {new Date(exam.startTime).toLocaleString()} - {new Date(exam.endTime).toLocaleString()}
+                    </div>
                   </div>
-                  <div className="text-xs text-gray-400 mt-1">
-                    {new Date(exam.startTime).toLocaleString()} - {new Date(exam.endTime).toLocaleString()}
+                  <div>
+                    {exam.isSubmitted ? (
+                      <span className="flex items-center gap-2 px-4 py-2.5 bg-green-50 text-green-700 rounded-xl text-sm font-medium">
+                        <CheckCircle className="w-4 h-4" />
+                        Submitted
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => handleStartExam(exam._id)}
+                        className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors text-sm font-medium"
+                      >
+                        <PlayCircle className="w-4 h-4" />
+                        {exam.hasStarted ? 'Continue Exam' : 'Start Exam'}
+                      </button>
+                    )}
                   </div>
-                </div>
-                <div>
-                  {exam.isSubmitted ? (
-                    <span className="flex items-center gap-2 px-4 py-2.5 bg-green-50 text-green-700 rounded-xl text-sm font-medium">
-                      <CheckCircle className="w-4 h-4" />
-                      Submitted
-                    </span>
-                  ) : (
-                    <button
-                      onClick={() => handleStartExam(exam._id)}
-                      className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors text-sm font-medium"
-                    >
-                      <PlayCircle className="w-4 h-4" />
-                      {exam.hasStarted ? 'Continue Exam' : 'Start Exam'}
-                    </button>
-                  )}
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

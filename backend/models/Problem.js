@@ -4,6 +4,7 @@ const testCaseSchema = new mongoose.Schema(
   {
     input: { type: String, default: '' },
     output: { type: String, required: true },
+    score: { type: Number, default: 1, min: 0 },
   },
   { _id: false }
 );

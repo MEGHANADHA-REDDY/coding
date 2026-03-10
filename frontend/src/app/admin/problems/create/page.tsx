@@ -10,6 +10,7 @@ import Link from 'next/link';
 interface TestCase {
   input: string;
   output: string;
+  score: number;
 }
 
 export default function CreateProblemPage() {
@@ -18,13 +19,14 @@ export default function CreateProblemPage() {
   const [description, setDescription] = useState('');
   const [constraints, setConstraints] = useState('');
   const [difficulty, setDifficulty] = useState('easy');
-  const [sampleTestCases, setSampleTestCases] = useState<TestCase[]>([{ input: '', output: '' }]);
-  const [hiddenTestCases, setHiddenTestCases] = useState<TestCase[]>([{ input: '', output: '' }]);
+  const [sampleTestCases, setSampleTestCases] = useState<TestCase[]>([{ input: '', output: '', score: 0 }]);
+  const [hiddenTestCases, setHiddenTestCases] = useState<TestCase[]>([{ input: '', output: '', score: 1 }]);
   const [submitting, setSubmitting] = useState(false);
 
   const addTestCase = (type: 'sample' | 'hidden') => {
     const setter = type === 'sample' ? setSampleTestCases : setHiddenTestCases;
-    setter((prev) => [...prev, { input: '', output: '' }]);
+    const defaultScore = type === 'hidden' ? 1 : 0;
+    setter((prev) => [...prev, { input: '', output: '', score: defaultScore }]);
   };
 
   const removeTestCase = (type: 'sample' | 'hidden', index: number) => {
@@ -32,7 +34,7 @@ export default function CreateProblemPage() {
     setter((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const updateTestCase = (type: 'sample' | 'hidden', index: number, field: 'input' | 'output', value: string) => {
+  const updateTestCase = (type: 'sample' | 'hidden', index: number, field: 'input' | 'output' | 'score', value: string | number) => {
     const setter = type === 'sample' ? setSampleTestCases : setHiddenTestCases;
     setter((prev) => prev.map((tc, i) => (i === index ? { ...tc, [field]: value } : tc)));
   };
@@ -63,7 +65,14 @@ export default function CreateProblemPage() {
   const renderTestCases = (type: 'sample' | 'hidden', cases: TestCase[]) => (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <label className="block text-sm font-medium text-gray-700 capitalize">{type} Test Cases</label>
+        <label className="block text-sm font-medium text-gray-700 capitalize">
+          {type} Test Cases
+          {type === 'hidden' && (
+            <span className="ml-2 text-xs text-gray-400 font-normal">
+              (Total: {cases.reduce((s, tc) => s + (tc.score || 0), 0)} pts)
+            </span>
+          )}
+        </label>
         <button type="button" onClick={() => addTestCase(type)} className="flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-700">
           <Plus className="w-4 h-4" /> Add
         </button>
@@ -89,6 +98,19 @@ export default function CreateProblemPage() {
               required
             />
           </div>
+          {type === 'hidden' && (
+            <div className="w-20">
+              <input
+                type="number"
+                min={0}
+                placeholder="Score"
+                value={tc.score}
+                onChange={(e) => updateTestCase(type, i, 'score', parseInt(e.target.value) || 0)}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+              />
+              <span className="text-xs text-gray-400 mt-0.5 block text-center">pts</span>
+            </div>
+          )}
           {cases.length > 1 && (
             <button type="button" onClick={() => removeTestCase(type, i)} className="mt-2 text-red-400 hover:text-red-600">
               <Trash2 className="w-4 h-4" />

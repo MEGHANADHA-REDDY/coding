@@ -20,7 +20,12 @@ const examSchema = new mongoose.Schema(
       {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Problem',
-        required: true,
+      },
+    ],
+    quizzes: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Quiz',
       },
     ],
     allowedStudents: [

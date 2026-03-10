@@ -15,7 +15,11 @@ interface LeaderboardEntry {
   name: string;
   rollNumber: string;
   email: string;
+  codingScore: number;
+  quizScore: number;
+  totalScore: number;
   solvedCount: number;
+  correctAnswers: number;
   totalTime: number;
 }
 
@@ -24,6 +28,9 @@ export default function AdminLeaderboardPage() {
   const [selectedExam, setSelectedExam] = useState('');
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [examTitle, setExamTitle] = useState('');
+  const [maxPossibleScore, setMaxPossibleScore] = useState(0);
+  const [codingMaxScore, setCodingMaxScore] = useState(0);
+  const [quizMaxScore, setQuizMaxScore] = useState(0);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -46,6 +53,9 @@ export default function AdminLeaderboardPage() {
         const res = await api.get(`/leaderboard/${selectedExam}`);
         setLeaderboard(res.data.leaderboard);
         setExamTitle(res.data.examTitle);
+        setMaxPossibleScore(res.data.maxPossibleScore || 0);
+        setCodingMaxScore(res.data.codingMaxScore || 0);
+        setQuizMaxScore(res.data.quizMaxScore || 0);
       } catch {
         toast.error('Failed to fetch leaderboard');
       } finally {
@@ -89,7 +99,7 @@ export default function AdminLeaderboardPage() {
         )}
       </div>
 
-      <div className="mb-6">
+      <div className="mb-6 flex items-center gap-4 flex-wrap">
         <select
           value={selectedExam}
           onChange={(e) => setSelectedExam(e.target.value)}
@@ -100,6 +110,13 @@ export default function AdminLeaderboardPage() {
             <option key={exam._id} value={exam._id}>{exam.title}</option>
           ))}
         </select>
+        {maxPossibleScore > 0 && selectedExam && (
+          <div className="flex items-center gap-3 text-sm text-gray-500">
+            <span>Max: <span className="font-semibold text-indigo-600">{maxPossibleScore}</span> pts</span>
+            {codingMaxScore > 0 && <span className="text-xs">(Coding: {codingMaxScore})</span>}
+            {quizMaxScore > 0 && <span className="text-xs">(Quiz: {quizMaxScore})</span>}
+          </div>
+        )}
       </div>
 
       {!selectedExam ? (
@@ -125,9 +142,15 @@ export default function AdminLeaderboardPage() {
               <tr>
                 <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Rank</th>
                 <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Name</th>
-                <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Roll Number</th>
-                <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Solved</th>
-                <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Total Time</th>
+                <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Roll No.</th>
+                <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Total Score</th>
+                {codingMaxScore > 0 && (
+                  <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Coding</th>
+                )}
+                {quizMaxScore > 0 && (
+                  <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Quiz</th>
+                )}
+                <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Time</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
@@ -145,7 +168,21 @@ export default function AdminLeaderboardPage() {
                   </td>
                   <td className="px-6 py-4 font-medium text-gray-900">{entry.name}</td>
                   <td className="px-6 py-4 text-sm text-gray-500">{entry.rollNumber}</td>
-                  <td className="px-6 py-4 text-sm font-semibold text-indigo-600">{entry.solvedCount}</td>
+                  <td className="px-6 py-4">
+                    <span className="text-sm font-bold text-indigo-600">{entry.totalScore}</span>
+                    <span className="text-xs text-gray-400">/{maxPossibleScore}</span>
+                  </td>
+                  {codingMaxScore > 0 && (
+                    <td className="px-6 py-4 text-sm text-gray-600">
+                      {entry.codingScore}<span className="text-xs text-gray-400">/{codingMaxScore}</span>
+                      <span className="text-xs text-gray-400 ml-1">({entry.solvedCount} solved)</span>
+                    </td>
+                  )}
+                  {quizMaxScore > 0 && (
+                    <td className="px-6 py-4 text-sm text-gray-600">
+                      {entry.quizScore}<span className="text-xs text-gray-400">/{quizMaxScore}</span>
+                    </td>
+                  )}
                   <td className="px-6 py-4 text-sm text-gray-500">{entry.totalTime}s</td>
                 </tr>
               ))}

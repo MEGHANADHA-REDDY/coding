@@ -68,6 +68,10 @@ exports.submitCode = async (req, res) => {
 
       submission.status = result.status;
       submission.executionTime = result.executionTime;
+      submission.score = result.score;
+      submission.maxScore = result.maxScore;
+      submission.passedTestCases = result.passedTestCases;
+      submission.totalTestCases = result.totalTestCases;
       await submission.save();
 
       res.json({
@@ -75,6 +79,10 @@ exports.submitCode = async (req, res) => {
           _id: submission._id,
           status: submission.status,
           executionTime: submission.executionTime,
+          score: submission.score,
+          maxScore: submission.maxScore,
+          passedTestCases: submission.passedTestCases,
+          totalTestCases: submission.totalTestCases,
           language: submission.language,
           details: result.details,
           createdAt: submission.createdAt,

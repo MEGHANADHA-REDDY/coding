@@ -10,11 +10,13 @@ import {
   Send,
   AlertTriangle,
   Trophy,
+  CircleDot,
 } from 'lucide-react';
 
 const adminLinks = [
   { href: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/admin/problems', label: 'Problems', icon: FileCode },
+  { href: '/admin/quizzes', label: 'Quizzes', icon: CircleDot },
   { href: '/admin/exams', label: 'Exams', icon: ClipboardList },
   { href: '/admin/students', label: 'Students', icon: Users },
   { href: '/admin/submissions', label: 'Submissions', icon: Send },

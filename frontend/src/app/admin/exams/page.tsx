@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
-import { Plus, ClipboardList } from 'lucide-react';
+import { Plus, ClipboardList, Pencil } from 'lucide-react';
 
 interface Exam {
   _id: string;
@@ -12,6 +12,7 @@ interface Exam {
   startTime: string;
   endTime: string;
   problems: { _id: string; title: string }[];
+  quizzes: { _id: string; title: string }[];
   allowedStudents: { _id: string; name: string }[];
   isActive: boolean;
   maxViolations: number;
@@ -81,6 +82,7 @@ export default function ExamsPage() {
                     <h3 className="font-semibold text-gray-900 text-lg">{exam.title}</h3>
                     <div className="flex items-center gap-4 mt-2 text-sm text-gray-500">
                       <span>{exam.problems.length} problems</span>
+                      {exam.quizzes?.length > 0 && <span>{exam.quizzes.length} quizzes</span>}
                       <span>{exam.allowedStudents.length} students</span>
                       <span>Max violations: {exam.maxViolations}</span>
                     </div>
@@ -89,9 +91,18 @@ export default function ExamsPage() {
                       <span>End: {new Date(exam.endTime).toLocaleString()}</span>
                     </div>
                   </div>
-                  <span className={`px-3 py-1 rounded-full text-xs font-medium ${status.color}`}>
-                    {status.label}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <Link
+                      href={`/admin/exams/edit/${exam._id}`}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      Edit
+                    </Link>
+                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${status.color}`}>
+                      {status.label}
+                    </span>
+                  </div>
                 </div>
               </div>
             );

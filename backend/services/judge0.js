@@ -89,9 +89,15 @@ const evaluateSubmission = async (code, language, hiddenTestCases) => {
   }
 
   let totalTime = 0;
+  let earnedScore = 0;
+  let passedCount = 0;
+  const maxScore = hiddenTestCases.reduce((sum, tc) => sum + (tc.score || 1), 0);
+  let finalStatus = 'AC';
+  let failDetails = '';
 
   for (let i = 0; i < hiddenTestCases.length; i++) {
     const testCase = hiddenTestCases[i];
+    const tcScore = testCase.score || 1;
 
     try {
       const token = await submitCode(code, languageId, testCase.input);
@@ -102,37 +108,43 @@ const evaluateSubmission = async (code, language, hiddenTestCases) => {
         return {
           status: 'CE',
           executionTime: 0,
+          score: earnedScore,
+          maxScore,
+          passedTestCases: passedCount,
+          totalTestCases: hiddenTestCases.length,
           details: result.compile_output || 'Compilation error',
         };
       }
 
       if (statusId >= 7 && statusId <= 12) {
-        return {
-          status: 'RE',
-          executionTime: parseFloat(result.time) || 0,
-          details: result.stderr || 'Runtime error',
-        };
+        if (finalStatus === 'AC') {
+          finalStatus = 'RE';
+          failDetails = result.stderr || 'Runtime error';
+        }
+        continue;
       }
 
       if (statusId === 5) {
-        return {
-          status: 'TLE',
-          executionTime: parseFloat(result.time) || 0,
-          details: 'Time limit exceeded',
-        };
+        if (finalStatus === 'AC') {
+          finalStatus = 'TLE';
+          failDetails = 'Time limit exceeded';
+        }
+        continue;
       }
 
       const actualOutput = (result.stdout || '').trim();
       const expectedOutput = testCase.output.trim();
 
       if (actualOutput !== expectedOutput) {
-        return {
-          status: 'WA',
-          executionTime: parseFloat(result.time) || 0,
-          details: `Failed on test case ${i + 1}`,
-        };
+        if (finalStatus === 'AC') {
+          finalStatus = 'WA';
+          failDetails = `Failed on test case ${i + 1}`;
+        }
+        continue;
       }
 
+      earnedScore += tcScore;
+      passedCount++;
       totalTime += parseFloat(result.time) || 0;
     } catch (error) {
       const statusCode = error.response?.status;
@@ -151,18 +163,27 @@ const evaluateSubmission = async (code, language, hiddenTestCases) => {
         throw new Error('Judge0 API rate limit exceeded. Please wait and try again.');
       }
 
-      return {
-        status: 'RE',
-        executionTime: 0,
-        details: `Execution error on test case ${i + 1}: ${error.message}`,
-      };
+      if (finalStatus === 'AC') {
+        finalStatus = 'RE';
+        failDetails = `Execution error on test case ${i + 1}: ${error.message}`;
+      }
     }
   }
 
+  if (passedCount === hiddenTestCases.length) {
+    finalStatus = 'AC';
+  }
+
   return {
-    status: 'AC',
+    status: finalStatus,
     executionTime: Math.round(totalTime * 1000) / 1000,
-    details: `All ${hiddenTestCases.length} test cases passed`,
+    score: earnedScore,
+    maxScore,
+    passedTestCases: passedCount,
+    totalTestCases: hiddenTestCases.length,
+    details: finalStatus === 'AC'
+      ? `All ${hiddenTestCases.length} test cases passed (${earnedScore}/${maxScore} pts)`
+      : `${failDetails} — passed ${passedCount}/${hiddenTestCases.length} (${earnedScore}/${maxScore} pts)`,
   };
 };
 

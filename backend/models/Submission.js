@@ -35,6 +35,22 @@ const submissionSchema = new mongoose.Schema(
       type: Number,
       default: null,
     },
+    score: {
+      type: Number,
+      default: 0,
+    },
+    maxScore: {
+      type: Number,
+      default: 0,
+    },
+    passedTestCases: {
+      type: Number,
+      default: 0,
+    },
+    totalTestCases: {
+      type: Number,
+      default: 0,
+    },
   },
   { timestamps: true }
 );

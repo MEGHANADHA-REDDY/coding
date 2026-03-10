@@ -1,9 +1,12 @@
 const { validationResult } = require('express-validator');
 const User = require('../models/User');
 const Problem = require('../models/Problem');
+const Quiz = require('../models/Quiz');
 const Exam = require('../models/Exam');
 const Submission = require('../models/Submission');
+const QuizSubmission = require('../models/QuizSubmission');
 const Violation = require('../models/Violation');
+const ExamSession = require('../models/ExamSession');
 const { parseCSV } = require('../utils/csvParser');
 
 // ── Students ──
@@ -196,13 +199,14 @@ exports.createExam = async (req, res) => {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { title, startTime, endTime, problems, allowedStudents, maxViolations } = req.body;
+    const { title, startTime, endTime, problems, quizzes, allowedStudents, maxViolations } = req.body;
 
     const exam = await Exam.create({
       title,
       startTime,
       endTime,
-      problems,
+      problems: problems || [],
+      quizzes: quizzes || [],
       allowedStudents,
       maxViolations: maxViolations || 3,
     });
@@ -218,6 +222,7 @@ exports.getExams = async (req, res) => {
   try {
     const exams = await Exam.find()
       .populate('problems', 'title difficulty')
+      .populate('quizzes', 'title questions')
       .populate('allowedStudents', 'name email rollNumber')
       .sort({ createdAt: -1 });
 
@@ -282,5 +287,145 @@ exports.getViolations = async (req, res) => {
   } catch (error) {
     console.error('Get violations error:', error);
     res.status(500).json({ error: 'Failed to fetch violations.' });
+  }
+};
+
+// ── Exam Details (for edit page) ──
+
+exports.getExamById = async (req, res) => {
+  try {
+    const exam = await Exam.findById(req.params.id)
+      .populate('problems', 'title difficulty')
+      .populate('quizzes', 'title questions')
+      .populate('allowedStudents', 'name email rollNumber');
+
+    if (!exam) {
+      return res.status(404).json({ error: 'Exam not found.' });
+    }
+
+    const sessions = await ExamSession.find({ examId: exam._id })
+      .populate('studentId', 'name email rollNumber');
+
+    const sessionMap = {};
+    sessions.forEach((s) => {
+      sessionMap[s.studentId._id.toString()] = {
+        hasStarted: true,
+        isSubmitted: s.isSubmitted,
+        violationCount: s.violationCount,
+      };
+    });
+
+    res.json({ exam, sessions: sessionMap });
+  } catch (error) {
+    console.error('Get exam by ID error:', error);
+    res.status(500).json({ error: 'Failed to fetch exam.' });
+  }
+};
+
+// ── Quizzes ──
+
+exports.createQuiz = async (req, res) => {
+  try {
+    const { title, description, questions } = req.body;
+
+    if (!title || !questions || questions.length === 0) {
+      return res.status(400).json({ error: 'Title and at least one question are required.' });
+    }
+
+    const quiz = await Quiz.create({
+      title,
+      description: description || '',
+      questions,
+      createdBy: req.user.id,
+    });
+
+    res.status(201).json({ message: 'Quiz created successfully.', quiz });
+  } catch (error) {
+    console.error('Create quiz error:', error);
+    res.status(500).json({ error: 'Failed to create quiz.' });
+  }
+};
+
+exports.getQuizzes = async (req, res) => {
+  try {
+    const quizzes = await Quiz.find()
+      .populate('createdBy', 'name email')
+      .sort({ createdAt: -1 });
+
+    res.json({ quizzes });
+  } catch (error) {
+    console.error('Get quizzes error:', error);
+    res.status(500).json({ error: 'Failed to fetch quizzes.' });
+  }
+};
+
+exports.getQuizById = async (req, res) => {
+  try {
+    const quiz = await Quiz.findById(req.params.id).populate('createdBy', 'name email');
+
+    if (!quiz) {
+      return res.status(404).json({ error: 'Quiz not found.' });
+    }
+
+    res.json({ quiz });
+  } catch (error) {
+    console.error('Get quiz error:', error);
+    res.status(500).json({ error: 'Failed to fetch quiz.' });
+  }
+};
+
+exports.updateQuiz = async (req, res) => {
+  try {
+    const quiz = await Quiz.findByIdAndUpdate(req.params.id, req.body, {
+      new: true,
+      runValidators: true,
+    });
+
+    if (!quiz) {
+      return res.status(404).json({ error: 'Quiz not found.' });
+    }
+
+    res.json({ message: 'Quiz updated successfully.', quiz });
+  } catch (error) {
+    console.error('Update quiz error:', error);
+    res.status(500).json({ error: 'Failed to update quiz.' });
+  }
+};
+
+exports.deleteQuiz = async (req, res) => {
+  try {
+    const quiz = await Quiz.findByIdAndDelete(req.params.id);
+
+    if (!quiz) {
+      return res.status(404).json({ error: 'Quiz not found.' });
+    }
+
+    res.json({ message: 'Quiz deleted successfully.' });
+  } catch (error) {
+    console.error('Delete quiz error:', error);
+    res.status(500).json({ error: 'Failed to delete quiz.' });
+  }
+};
+
+// ── Reset Student Exam (allow retake) ──
+
+exports.resetStudentExam = async (req, res) => {
+  try {
+    const { examId, studentId } = req.params;
+
+    const exam = await Exam.findById(examId);
+    if (!exam) {
+      return res.status(404).json({ error: 'Exam not found.' });
+    }
+
+    await ExamSession.deleteOne({ examId, studentId });
+    await Submission.deleteMany({ examId, studentId });
+    await QuizSubmission.deleteMany({ examId, studentId });
+    await Violation.deleteMany({ examId, studentId });
+
+    res.json({ message: 'Student exam session reset. They can retake the exam.' });
+  } catch (error) {
+    console.error('Reset student exam error:', error);
+    res.status(500).json({ error: 'Failed to reset student exam.' });
   }
 };

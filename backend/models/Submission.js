@@ -19,12 +19,17 @@ const submissionSchema = new mongoose.Schema(
     },
     language: {
       type: String,
-      enum: ['python', 'java'],
-      required: [true, 'Language is required'],
+      enum: ['python', 'java', ''],
+      default: '',
     },
     code: {
       type: String,
-      required: [true, 'Code is required'],
+      default: '',
+    },
+    selectedAnswer: {
+      type: String,
+      enum: ['a', 'b', 'c', 'd', ''],
+      default: '',
     },
     status: {
       type: String,

@@ -4,15 +4,21 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
-import { Plus, ClipboardList, Pencil } from 'lucide-react';
+import { Plus, ClipboardList } from 'lucide-react';
+
+interface Section {
+  label: string;
+  type: string;
+  durationMinutes: number;
+  problems: { _id: string; title: string }[];
+}
 
 interface Exam {
   _id: string;
   title: string;
   startTime: string;
   endTime: string;
-  problems: { _id: string; title: string }[];
-  quizzes: { _id: string; title: string }[];
+  sections: Section[];
   allowedStudents: { _id: string; name: string }[];
   isActive: boolean;
   maxViolations: number;
@@ -46,6 +52,12 @@ export default function ExamsPage() {
     if (now > end) return { label: 'Ended', color: 'bg-red-100 text-red-700' };
     return { label: 'Active', color: 'bg-green-100 text-green-700' };
   };
+
+  const totalProblems = (exam: Exam) =>
+    exam.sections.reduce((sum, s) => sum + s.problems.length, 0);
+
+  const totalDuration = (exam: Exam) =>
+    exam.sections.reduce((sum, s) => sum + s.durationMinutes, 0);
 
   return (
     <div>
@@ -81,28 +93,25 @@ export default function ExamsPage() {
                   <div>
                     <h3 className="font-semibold text-gray-900 text-lg">{exam.title}</h3>
                     <div className="flex items-center gap-4 mt-2 text-sm text-gray-500">
-                      <span>{exam.problems.length} problems</span>
-                      {exam.quizzes?.length > 0 && <span>{exam.quizzes.length} quizzes</span>}
+                      <span>{exam.sections.length} section{exam.sections.length > 1 ? 's' : ''}</span>
+                      <span>{totalProblems(exam)} problems</span>
+                      <span>{totalDuration(exam)} min</span>
                       <span>{exam.allowedStudents.length} students</span>
-                      <span>Max violations: {exam.maxViolations}</span>
+                    </div>
+                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                      {exam.sections.map((s, i) => (
+                        <span key={i} className={`text-xs px-2 py-0.5 rounded-full ${s.type === 'coding' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
+                          {s.label || `Section ${i + 1}`}: {s.type} ({s.durationMinutes}min)
+                        </span>
+                      ))}
                     </div>
                     <div className="flex items-center gap-4 mt-1 text-sm text-gray-400">
-                      <span>Start: {new Date(exam.startTime).toLocaleString()}</span>
-                      <span>End: {new Date(exam.endTime).toLocaleString()}</span>
+                      <span>Window: {new Date(exam.startTime).toLocaleString()} - {new Date(exam.endTime).toLocaleString()}</span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Link
-                      href={`/admin/exams/edit/${exam._id}`}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                      Edit
-                    </Link>
-                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${status.color}`}>
-                      {status.label}
-                    </span>
-                  </div>
+                  <span className={`px-3 py-1 rounded-full text-xs font-medium ${status.color}`}>
+                    {status.label}
+                  </span>
                 </div>
               </div>
             );

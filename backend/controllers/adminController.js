@@ -1,13 +1,11 @@
 const { validationResult } = require('express-validator');
 const User = require('../models/User');
 const Problem = require('../models/Problem');
-const Quiz = require('../models/Quiz');
 const Exam = require('../models/Exam');
 const Submission = require('../models/Submission');
-const QuizSubmission = require('../models/QuizSubmission');
 const Violation = require('../models/Violation');
-const ExamSession = require('../models/ExamSession');
-const { parseCSV } = require('../utils/csvParser');
+const { parseFile } = require('../utils/csvParser');
+const { notifyStudentsOfExam } = require('../services/notification');
 
 // ── Students ──
 
@@ -18,7 +16,7 @@ exports.createStudent = async (req, res) => {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { name, email, password, rollNumber } = req.body;
+    const { name, email, password, rollNumber, batch, mobileNumber } = req.body;
 
     const existing = await User.findOne({ email });
     if (existing) {
@@ -30,6 +28,8 @@ exports.createStudent = async (req, res) => {
       email,
       password,
       rollNumber,
+      batch: batch || '',
+      mobileNumber: mobileNumber || '',
       role: 'student',
     });
 
@@ -43,20 +43,20 @@ exports.createStudent = async (req, res) => {
 exports.bulkUploadStudents = async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ error: 'CSV file is required.' });
+      return res.status(400).json({ error: 'CSV/Excel file is required.' });
     }
 
-    const rows = await parseCSV(req.file.buffer);
+    const rows = await parseFile(req.file);
 
     if (rows.length === 0) {
-      return res.status(400).json({ error: 'CSV file is empty.' });
+      return res.status(400).json({ error: 'File is empty.' });
     }
 
     const results = { created: 0, errors: [] };
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
-      const rowNum = i + 2; // +2 for header row + 0-index
+      const rowNum = i + 2;
 
       if (!row.name || !row.email || !row.password || !row.rollnumber) {
         results.errors.push({
@@ -67,17 +67,19 @@ exports.bulkUploadStudents = async (req, res) => {
       }
 
       try {
-        const existing = await User.findOne({ email: row.email.trim().toLowerCase() });
+        const existing = await User.findOne({ email: row.email.toString().trim().toLowerCase() });
         if (existing) {
           results.errors.push({ row: rowNum, error: `Email ${row.email} already exists` });
           continue;
         }
 
         await User.create({
-          name: row.name.trim(),
-          email: row.email.trim().toLowerCase(),
-          password: row.password,
-          rollNumber: row.rollnumber.trim(),
+          name: row.name.toString().trim(),
+          email: row.email.toString().trim().toLowerCase(),
+          password: row.password.toString(),
+          rollNumber: row.rollnumber.toString().trim(),
+          batch: (row.batch || '').toString().trim(),
+          mobileNumber: (row.mobilenumber || row.mobile || '').toString().trim(),
           role: 'student',
         });
 
@@ -93,13 +95,19 @@ exports.bulkUploadStudents = async (req, res) => {
     });
   } catch (error) {
     console.error('Bulk upload error:', error);
-    res.status(500).json({ error: 'Failed to process CSV upload.' });
+    res.status(500).json({ error: 'Failed to process file upload.' });
   }
 };
 
 exports.getStudents = async (req, res) => {
   try {
-    const students = await User.find({ role: 'student' })
+    const filter = { role: 'student' };
+
+    if (req.query.batch) {
+      filter.batch = { $regex: new RegExp(req.query.batch, 'i') };
+    }
+
+    const students = await User.find(filter)
       .select('-__v')
       .sort({ createdAt: -1 });
 
@@ -107,6 +115,49 @@ exports.getStudents = async (req, res) => {
   } catch (error) {
     console.error('Get students error:', error);
     res.status(500).json({ error: 'Failed to fetch students.' });
+  }
+};
+
+exports.updateStudent = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, email, rollNumber, batch, mobileNumber, password } = req.body;
+
+    const student = await User.findById(id);
+    if (!student || student.role !== 'student') {
+      return res.status(404).json({ error: 'Student not found.' });
+    }
+
+    if (email && email !== student.email) {
+      const existing = await User.findOne({ email, _id: { $ne: id } });
+      if (existing) {
+        return res.status(409).json({ error: 'Email already in use by another user.' });
+      }
+      student.email = email;
+    }
+
+    if (name !== undefined) student.name = name;
+    if (rollNumber !== undefined) student.rollNumber = rollNumber;
+    if (batch !== undefined) student.batch = batch;
+    if (mobileNumber !== undefined) student.mobileNumber = mobileNumber;
+    if (password && password.length >= 6) student.password = password;
+
+    await student.save();
+
+    res.json({ message: 'Student updated successfully.', student });
+  } catch (error) {
+    console.error('Update student error:', error);
+    res.status(500).json({ error: 'Failed to update student.' });
+  }
+};
+
+exports.getStudentBatches = async (req, res) => {
+  try {
+    const batches = await User.distinct('batch', { role: 'student', batch: { $ne: '' } });
+    res.json({ batches: batches.sort() });
+  } catch (error) {
+    console.error('Get batches error:', error);
+    res.status(500).json({ error: 'Failed to fetch batches.' });
   }
 };
 
@@ -119,16 +170,26 @@ exports.createProblem = async (req, res) => {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { title, description, constraints, difficulty, sampleTestCases, hiddenTestCases } =
-      req.body;
+    const {
+      type, title, description, constraints, difficulty,
+      company, level, boilerplateCode,
+      sampleTestCases, hiddenTestCases,
+      options, correctAnswer,
+    } = req.body;
 
     const problem = await Problem.create({
+      type: type || 'coding',
       title,
       description,
       constraints,
       difficulty,
-      sampleTestCases,
-      hiddenTestCases,
+      company: company || '',
+      level: level || '',
+      boilerplateCode: boilerplateCode || '',
+      sampleTestCases: sampleTestCases || [],
+      hiddenTestCases: hiddenTestCases || [],
+      options: options || {},
+      correctAnswer: correctAnswer || '',
       createdBy: req.user.id,
     });
 
@@ -139,9 +200,145 @@ exports.createProblem = async (req, res) => {
   }
 };
 
+exports.bulkUploadProblems = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'CSV/Excel file is required.' });
+    }
+
+    const rows = await parseFile(req.file);
+
+    if (rows.length === 0) {
+      return res.status(400).json({ error: 'File is empty.' });
+    }
+
+    const results = { created: 0, errors: [] };
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const rowNum = i + 2;
+
+      try {
+        const isMCQ = row.optiona || row.optionb || row.optionc || row.optiond;
+
+        if (isMCQ) {
+          if (!row.question && !row.title) {
+            results.errors.push({ row: rowNum, error: 'Missing question/title' });
+            continue;
+          }
+          if (!row.optiona || !row.optionb || !row.optionc || !row.optiond) {
+            results.errors.push({ row: rowNum, error: 'All 4 options (A-D) required for MCQ' });
+            continue;
+          }
+          if (!row.correctanswer) {
+            results.errors.push({ row: rowNum, error: 'correctAnswer required for MCQ' });
+            continue;
+          }
+
+          await Problem.create({
+            type: 'mcq',
+            title: (row.question || row.title || '').toString().trim(),
+            description: (row.question || row.title || '').toString().trim(),
+            difficulty: (row.difficulty || 'easy').toString().trim().toLowerCase(),
+            company: (row.company || '').toString().trim(),
+            level: (row.level || '').toString().trim(),
+            options: {
+              a: row.optiona.toString().trim(),
+              b: row.optionb.toString().trim(),
+              c: row.optionc.toString().trim(),
+              d: row.optiond.toString().trim(),
+            },
+            correctAnswer: row.correctanswer.toString().trim().toLowerCase(),
+            createdBy: req.user.id,
+          });
+        } else {
+          if (!row.title) {
+            results.errors.push({ row: rowNum, error: 'Missing title for coding problem' });
+            continue;
+          }
+
+          const hiddenTestCases = [];
+          const sampleTestCases = [];
+
+          if (row.sampleinput !== undefined || row.sampleoutput !== undefined) {
+            sampleTestCases.push({
+              input: (row.sampleinput || '').toString(),
+              output: (row.sampleoutput || '').toString(),
+            });
+          }
+
+          if (row.hiddeninput !== undefined || row.hiddenoutput !== undefined) {
+            hiddenTestCases.push({
+              input: (row.hiddeninput || '').toString(),
+              output: (row.hiddenoutput || '').toString(),
+            });
+          }
+
+          // Support multiple test cases: hiddeninput1, hiddenoutput1, hiddeninput2, ...
+          for (let n = 1; n <= 20; n++) {
+            const hi = row[`hiddeninput${n}`];
+            const ho = row[`hiddenoutput${n}`];
+            if (hi !== undefined || ho !== undefined) {
+              hiddenTestCases.push({
+                input: (hi || '').toString(),
+                output: (ho || '').toString(),
+              });
+            }
+            const si = row[`sampleinput${n}`];
+            const so = row[`sampleoutput${n}`];
+            if (si !== undefined || so !== undefined) {
+              sampleTestCases.push({
+                input: (si || '').toString(),
+                output: (so || '').toString(),
+              });
+            }
+          }
+
+          if (hiddenTestCases.length === 0) {
+            results.errors.push({ row: rowNum, error: 'At least one hidden test case required for coding' });
+            continue;
+          }
+
+          await Problem.create({
+            type: 'coding',
+            title: row.title.toString().trim(),
+            description: (row.description || '').toString().trim(),
+            difficulty: (row.difficulty || 'easy').toString().trim().toLowerCase(),
+            company: (row.company || '').toString().trim(),
+            level: (row.level || '').toString().trim(),
+            boilerplateCode: (row.boilerplatecode || row.boilerplate || '').toString(),
+            sampleTestCases,
+            hiddenTestCases,
+            createdBy: req.user.id,
+          });
+        }
+
+        results.created++;
+      } catch (err) {
+        results.errors.push({ row: rowNum, error: err.message });
+      }
+    }
+
+    res.json({
+      message: `Bulk upload complete. ${results.created} problems created.`,
+      ...results,
+    });
+  } catch (error) {
+    console.error('Bulk upload problems error:', error);
+    res.status(500).json({ error: 'Failed to process file upload.' });
+  }
+};
+
 exports.getProblems = async (req, res) => {
   try {
-    const problems = await Problem.find()
+    const filter = {};
+
+    if (req.query.type) filter.type = req.query.type;
+    if (req.query.company) filter.company = { $regex: new RegExp(req.query.company, 'i') };
+    if (req.query.level) filter.level = { $regex: new RegExp(req.query.level, 'i') };
+    if (req.query.difficulty) filter.difficulty = req.query.difficulty;
+
+    const problems = await Problem.find(filter)
       .populate('createdBy', 'name email')
       .sort({ createdAt: -1 });
 
@@ -149,6 +346,24 @@ exports.getProblems = async (req, res) => {
   } catch (error) {
     console.error('Get problems error:', error);
     res.status(500).json({ error: 'Failed to fetch problems.' });
+  }
+};
+
+exports.getProblemFilters = async (req, res) => {
+  try {
+    const [companies, levels, types] = await Promise.all([
+      Problem.distinct('company', { company: { $ne: '' } }),
+      Problem.distinct('level', { level: { $ne: '' } }),
+      Problem.distinct('type'),
+    ]);
+    res.json({
+      companies: companies.sort(),
+      levels: levels.sort(),
+      types: types.sort(),
+    });
+  } catch (error) {
+    console.error('Get problem filters error:', error);
+    res.status(500).json({ error: 'Failed to fetch filters.' });
   }
 };
 
@@ -199,17 +414,20 @@ exports.createExam = async (req, res) => {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { title, startTime, endTime, problems, quizzes, allowedStudents, maxViolations } = req.body;
+    const {
+      title, startTime, endTime, sections, allowedStudents, maxViolations,
+    } = req.body;
 
     const exam = await Exam.create({
       title,
       startTime,
       endTime,
-      problems: problems || [],
-      quizzes: quizzes || [],
+      sections,
       allowedStudents,
       maxViolations: maxViolations || 3,
     });
+
+    notifyStudentsOfExam(exam, allowedStudents);
 
     res.status(201).json({ message: 'Exam created successfully.', exam });
   } catch (error) {
@@ -221,9 +439,8 @@ exports.createExam = async (req, res) => {
 exports.getExams = async (req, res) => {
   try {
     const exams = await Exam.find()
-      .populate('problems', 'title difficulty')
-      .populate('quizzes', 'title questions')
-      .populate('allowedStudents', 'name email rollNumber')
+      .populate('sections.problems', 'title difficulty type')
+      .populate('allowedStudents', 'name email rollNumber batch')
       .sort({ createdAt: -1 });
 
     res.json({ exams });
@@ -261,7 +478,7 @@ exports.getSubmissions = async (req, res) => {
 
     const submissions = await Submission.find(filter)
       .populate('examId', 'title')
-      .populate('problemId', 'title')
+      .populate('problemId', 'title type')
       .populate('studentId', 'name email rollNumber')
       .sort({ createdAt: -1 });
 
@@ -287,145 +504,5 @@ exports.getViolations = async (req, res) => {
   } catch (error) {
     console.error('Get violations error:', error);
     res.status(500).json({ error: 'Failed to fetch violations.' });
-  }
-};
-
-// ── Exam Details (for edit page) ──
-
-exports.getExamById = async (req, res) => {
-  try {
-    const exam = await Exam.findById(req.params.id)
-      .populate('problems', 'title difficulty')
-      .populate('quizzes', 'title questions')
-      .populate('allowedStudents', 'name email rollNumber');
-
-    if (!exam) {
-      return res.status(404).json({ error: 'Exam not found.' });
-    }
-
-    const sessions = await ExamSession.find({ examId: exam._id })
-      .populate('studentId', 'name email rollNumber');
-
-    const sessionMap = {};
-    sessions.forEach((s) => {
-      sessionMap[s.studentId._id.toString()] = {
-        hasStarted: true,
-        isSubmitted: s.isSubmitted,
-        violationCount: s.violationCount,
-      };
-    });
-
-    res.json({ exam, sessions: sessionMap });
-  } catch (error) {
-    console.error('Get exam by ID error:', error);
-    res.status(500).json({ error: 'Failed to fetch exam.' });
-  }
-};
-
-// ── Quizzes ──
-
-exports.createQuiz = async (req, res) => {
-  try {
-    const { title, description, questions } = req.body;
-
-    if (!title || !questions || questions.length === 0) {
-      return res.status(400).json({ error: 'Title and at least one question are required.' });
-    }
-
-    const quiz = await Quiz.create({
-      title,
-      description: description || '',
-      questions,
-      createdBy: req.user.id,
-    });
-
-    res.status(201).json({ message: 'Quiz created successfully.', quiz });
-  } catch (error) {
-    console.error('Create quiz error:', error);
-    res.status(500).json({ error: 'Failed to create quiz.' });
-  }
-};
-
-exports.getQuizzes = async (req, res) => {
-  try {
-    const quizzes = await Quiz.find()
-      .populate('createdBy', 'name email')
-      .sort({ createdAt: -1 });
-
-    res.json({ quizzes });
-  } catch (error) {
-    console.error('Get quizzes error:', error);
-    res.status(500).json({ error: 'Failed to fetch quizzes.' });
-  }
-};
-
-exports.getQuizById = async (req, res) => {
-  try {
-    const quiz = await Quiz.findById(req.params.id).populate('createdBy', 'name email');
-
-    if (!quiz) {
-      return res.status(404).json({ error: 'Quiz not found.' });
-    }
-
-    res.json({ quiz });
-  } catch (error) {
-    console.error('Get quiz error:', error);
-    res.status(500).json({ error: 'Failed to fetch quiz.' });
-  }
-};
-
-exports.updateQuiz = async (req, res) => {
-  try {
-    const quiz = await Quiz.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-      runValidators: true,
-    });
-
-    if (!quiz) {
-      return res.status(404).json({ error: 'Quiz not found.' });
-    }
-
-    res.json({ message: 'Quiz updated successfully.', quiz });
-  } catch (error) {
-    console.error('Update quiz error:', error);
-    res.status(500).json({ error: 'Failed to update quiz.' });
-  }
-};
-
-exports.deleteQuiz = async (req, res) => {
-  try {
-    const quiz = await Quiz.findByIdAndDelete(req.params.id);
-
-    if (!quiz) {
-      return res.status(404).json({ error: 'Quiz not found.' });
-    }
-
-    res.json({ message: 'Quiz deleted successfully.' });
-  } catch (error) {
-    console.error('Delete quiz error:', error);
-    res.status(500).json({ error: 'Failed to delete quiz.' });
-  }
-};
-
-// ── Reset Student Exam (allow retake) ──
-
-exports.resetStudentExam = async (req, res) => {
-  try {
-    const { examId, studentId } = req.params;
-
-    const exam = await Exam.findById(examId);
-    if (!exam) {
-      return res.status(404).json({ error: 'Exam not found.' });
-    }
-
-    await ExamSession.deleteOne({ examId, studentId });
-    await Submission.deleteMany({ examId, studentId });
-    await QuizSubmission.deleteMany({ examId, studentId });
-    await Violation.deleteMany({ examId, studentId });
-
-    res.json({ message: 'Student exam session reset. They can retake the exam.' });
-  } catch (error) {
-    console.error('Reset student exam error:', error);
-    res.status(500).json({ error: 'Failed to reset student exam.' });
   }
 };

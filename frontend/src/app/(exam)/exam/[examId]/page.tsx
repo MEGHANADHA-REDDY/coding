@@ -6,7 +6,7 @@ import api from '@/lib/api';
 import toast from 'react-hot-toast';
 import CodeEditor from '@/components/CodeEditor';
 import AntiCheat from '@/components/AntiCheat';
-import { Clock, Send, ChevronLeft, ChevronRight, Loader2, LogOut, FileCode, CircleDot, CheckCircle2, Circle } from 'lucide-react';
+import { Clock, Send, ChevronLeft, ChevronRight, Loader2, LogOut, CheckCircle, ArrowRight } from 'lucide-react';
 
 interface Problem {
   _id: string;
@@ -14,28 +14,21 @@ interface Problem {
   description: string;
   constraints: string;
   difficulty: string;
+  type: string;
+  boilerplateCode?: string;
   sampleTestCases: { input: string; output: string }[];
+  options?: { a: string; b: string; c: string; d: string };
 }
 
-interface QuizQuestion {
-  _id: string;
-  questionText: string;
-  options: { text: string }[];
-  score: number;
-}
-
-interface QuizData {
-  _id: string;
-  title: string;
-  description: string;
-  questions: QuizQuestion[];
+interface SectionMeta {
+  label: string;
+  type: string;
+  durationMinutes: number;
 }
 
 interface ExamData {
   _id: string;
   title: string;
-  startTime: string;
-  endTime: string;
   maxViolations: number;
 }
 
@@ -47,19 +40,8 @@ interface SessionData {
 interface SubmissionResult {
   _id: string;
   status: string;
-  executionTime: number;
-  score: number;
-  maxScore: number;
-  passedTestCases: number;
-  totalTestCases: number;
-  details: string;
-}
-
-interface QuizSubmissionData {
-  quizId: string;
-  answers: { questionId: string; selectedOption: number }[];
-  score: number;
-  maxScore: number;
+  executionTime?: number;
+  details?: string;
 }
 
 export default function ExamPage() {
@@ -68,59 +50,55 @@ export default function ExamPage() {
   const examId = params.examId as string;
 
   const [exam, setExam] = useState<ExamData | null>(null);
+  const [sections, setSections] = useState<SectionMeta[]>([]);
+  const [currentSectionIndex, setCurrentSectionIndex] = useState(0);
+  const [sectionStartedAt, setSectionStartedAt] = useState<string>('');
   const [problems, setProblems] = useState<Problem[]>([]);
-  const [quizzes, setQuizzes] = useState<QuizData[]>([]);
   const [session, setSession] = useState<SessionData | null>(null);
   const [currentProblem, setCurrentProblem] = useState(0);
   const [language, setLanguage] = useState('python');
   const [codes, setCodes] = useState<Record<string, Record<string, string>>>({});
+  const [mcqAnswers, setMcqAnswers] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [lastResult, setLastResult] = useState<SubmissionResult | null>(null);
   const [timeLeft, setTimeLeft] = useState('');
   const [loading, setLoading] = useState(true);
   const [isAutoSubmitted, setIsAutoSubmitted] = useState(false);
   const [showFinishConfirm, setShowFinishConfirm] = useState(false);
+  const [showNextSectionConfirm, setShowNextSectionConfirm] = useState(false);
   const [finishing, setFinishing] = useState(false);
+  const [advancing, setAdvancing] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'coding' | 'quiz'>('coding');
-  const [currentQuizIndex, setCurrentQuizIndex] = useState(0);
-  const [quizAnswers, setQuizAnswers] = useState<Record<string, Record<string, number>>>({});
-  const [quizSubmissions, setQuizSubmissions] = useState<Record<string, QuizSubmissionData>>({});
-  const [submittingQuiz, setSubmittingQuiz] = useState(false);
+  const fetchSectionData = useCallback(async () => {
+    try {
+      const res = await api.get(`/exams/${examId}/problems`);
+      setExam(res.data.exam);
+      setSections(res.data.sections);
+      setCurrentSectionIndex(res.data.currentSection);
+      setSectionStartedAt(res.data.sectionStartedAt);
+      setProblems(res.data.problems);
+      setSession(res.data.session);
+      setCurrentProblem(0);
+      setLastResult(null);
+
+      const initialCodes: Record<string, Record<string, string>> = {};
+      for (const p of res.data.problems) {
+        if (p.type === 'coding' && p.boilerplateCode) {
+          initialCodes[p._id] = { python: p.boilerplateCode, java: p.boilerplateCode };
+        }
+      }
+      setCodes((prev) => ({ ...prev, ...initialCodes }));
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Failed to load exam');
+      router.push('/student/dashboard');
+    } finally {
+      setLoading(false);
+    }
+  }, [examId, router]);
 
   useEffect(() => {
-    const fetchExamData = async () => {
-      try {
-        const res = await api.get(`/exams/${examId}/problems`);
-        setExam(res.data.exam);
-        setProblems(res.data.problems || []);
-        setQuizzes(res.data.quizzes || []);
-        setSession(res.data.session);
-
-        if ((res.data.quizzes || []).length > 0 && (res.data.problems || []).length === 0) {
-          setActiveTab('quiz');
-        }
-
-        const existingSubs = res.data.quizSubmissions || [];
-        const subMap: Record<string, QuizSubmissionData> = {};
-        const ansMap: Record<string, Record<string, number>> = {};
-        existingSubs.forEach((sub: any) => {
-          subMap[sub.quizId] = sub;
-          const qAns: Record<string, number> = {};
-          (sub.answers || []).forEach((a: any) => { qAns[a.questionId] = a.selectedOption; });
-          ansMap[sub.quizId] = qAns;
-        });
-        setQuizSubmissions(subMap);
-        setQuizAnswers(ansMap);
-      } catch (error: any) {
-        toast.error(error.response?.data?.error || 'Failed to load exam');
-        router.push('/student/dashboard');
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchExamData();
-  }, [examId, router]);
+    fetchSectionData();
+  }, [fetchSectionData]);
 
   const handleAutoSubmit = useCallback(async () => {
     if (isAutoSubmitted) return;
@@ -128,20 +106,59 @@ export default function ExamPage() {
     try {
       await api.post(`/exams/${examId}/auto-submit`);
       toast.error('Exam auto-submitted!');
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
       router.push('/student/dashboard');
     } catch {
-      // Session may already be submitted
+      // already submitted
     }
   }, [examId, router, isAutoSubmitted]);
 
+  const handleAdvanceSection = useCallback(async () => {
+    setAdvancing(true);
+    try {
+      const res = await api.post(`/exams/${examId}/advance-section`);
+      if (res.data.submitted) {
+        toast.success('Exam submitted!');
+        if (document.fullscreenElement) {
+          document.exitFullscreen().catch(() => {});
+        }
+        router.push('/student/dashboard');
+      } else {
+        toast.success(`Moving to section ${res.data.currentSection + 1}`);
+        setCurrentSectionIndex(res.data.currentSection);
+        setSectionStartedAt(res.data.sectionStartedAt);
+        setShowNextSectionConfirm(false);
+        setAdvancing(false);
+        await fetchSectionData();
+      }
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Failed to advance');
+      setAdvancing(false);
+      setShowNextSectionConfirm(false);
+    }
+  }, [examId, router, fetchSectionData]);
+
+  // Section timer
   useEffect(() => {
-    if (!exam) return;
+    if (!sectionStartedAt || sections.length === 0) return;
+    const currentSection = sections[currentSectionIndex];
+    if (!currentSection) return;
+
+    const deadline = new Date(sectionStartedAt).getTime() + currentSection.durationMinutes * 60000;
+
     const timer = setInterval(() => {
-      const diff = new Date(exam.endTime).getTime() - Date.now();
+      const diff = deadline - Date.now();
       if (diff <= 0) {
-        setTimeLeft('Time Up!');
+        setTimeLeft('00:00:00');
         clearInterval(timer);
-        handleAutoSubmit();
+        const isLastSection = currentSectionIndex >= sections.length - 1;
+        if (isLastSection) {
+          handleAutoSubmit();
+        } else {
+          handleAdvanceSection();
+        }
         return;
       }
       const h = Math.floor(diff / 3600000);
@@ -150,7 +167,7 @@ export default function ExamPage() {
       setTimeLeft(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`);
     }, 1000);
     return () => clearInterval(timer);
-  }, [exam, handleAutoSubmit]);
+  }, [sectionStartedAt, sections, currentSectionIndex, handleAutoSubmit, handleAdvanceSection]);
 
   const handleViolationAutoSubmit = useCallback(() => {
     handleAutoSubmit();
@@ -170,60 +187,41 @@ export default function ExamPage() {
   const handleSubmit = async () => {
     const problem = problems[currentProblem];
     if (!problem) return;
-    const code = getCode(problem._id, language);
-    if (!code.trim()) return toast.error('Please write some code first');
 
-    setSubmitting(true);
-    setLastResult(null);
-
-    try {
-      const res = await api.post('/submissions', {
-        examId,
-        problemId: problem._id,
-        language,
-        code,
-      });
-      setLastResult(res.data.submission);
-      if (res.data.submission.status === 'AC') {
-        toast.success(`Accepted! ${res.data.submission.score}/${res.data.submission.maxScore} pts`);
-      } else {
-        toast.error(`${res.data.submission.status} — ${res.data.submission.details}`);
+    if (problem.type === 'mcq') {
+      const answer = mcqAnswers[problem._id];
+      if (!answer) return toast.error('Please select an answer');
+      setSubmitting(true);
+      setLastResult(null);
+      try {
+        const res = await api.post('/submissions', { examId, problemId: problem._id, selectedAnswer: answer });
+        setLastResult(res.data.submission);
+        toast[res.data.submission.status === 'AC' ? 'success' : 'error'](
+          res.data.submission.status === 'AC' ? 'Correct!' : 'Incorrect answer.'
+        );
+      } catch (error: any) {
+        toast.error(error.response?.data?.error || 'Submission failed');
+      } finally {
+        setSubmitting(false);
       }
-    } catch (error: any) {
-      toast.error(error.response?.data?.error || 'Submission failed');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleSelectAnswer = (quizId: string, questionId: string, optionIndex: number) => {
-    setQuizAnswers((prev) => ({
-      ...prev,
-      [quizId]: { ...prev[quizId], [questionId]: optionIndex },
-    }));
-  };
-
-  const handleSubmitQuiz = async (quizId: string) => {
-    const quiz = quizzes.find((q) => q._id === quizId);
-    if (!quiz) return;
-
-    const answers = quiz.questions.map((q) => ({
-      questionId: q._id,
-      selectedOption: quizAnswers[quizId]?.[q._id] ?? -1,
-    })).filter((a) => a.selectedOption >= 0);
-
-    if (answers.length === 0) return toast.error('Please answer at least one question');
-
-    setSubmittingQuiz(true);
-    try {
-      const res = await api.post(`/exams/${examId}/quiz-submit`, { quizId, answers });
-      const sub = res.data.quizSubmission;
-      setQuizSubmissions((prev) => ({ ...prev, [quizId]: sub }));
-      toast.success(`Quiz submitted! ${sub.score}/${sub.maxScore} pts (${sub.correctCount}/${sub.totalQuestions} correct)`);
-    } catch (error: any) {
-      toast.error(error.response?.data?.error || 'Failed to submit quiz');
-    } finally {
-      setSubmittingQuiz(false);
+    } else {
+      const code = getCode(problem._id, language);
+      if (!code.trim()) return toast.error('Please write some code first');
+      setSubmitting(true);
+      setLastResult(null);
+      try {
+        const res = await api.post('/submissions', { examId, problemId: problem._id, language, code });
+        setLastResult(res.data.submission);
+        if (res.data.submission.status === 'AC') {
+          toast.success('Accepted! All test cases passed.');
+        } else {
+          toast.error(`Result: ${res.data.submission.status} - ${res.data.submission.details}`);
+        }
+      } catch (error: any) {
+        toast.error(error.response?.data?.error || 'Submission failed');
+      } finally {
+        setSubmitting(false);
+      }
     }
   };
 
@@ -251,12 +249,13 @@ export default function ExamPage() {
     );
   }
 
-  if (!exam || (problems.length === 0 && quizzes.length === 0)) return null;
+  if (!exam || problems.length === 0) return null;
 
-  const hasCoding = problems.length > 0;
-  const hasQuiz = quizzes.length > 0;
   const problem = problems[currentProblem];
-  const currentQuiz = quizzes[currentQuizIndex];
+  const isMCQ = problem.type === 'mcq';
+  const currentSection = sections[currentSectionIndex];
+  const isLastSection = currentSectionIndex >= sections.length - 1;
+  const multiSection = sections.length > 1;
 
   const difficultyColor = (d: string) => {
     switch (d) {
@@ -278,8 +277,6 @@ export default function ExamPage() {
     }
   };
 
-  const optionLabels = ['A', 'B', 'C', 'D', 'E', 'F'];
-
   return (
     <AntiCheat
       examId={examId}
@@ -288,30 +285,34 @@ export default function ExamPage() {
       onAutoSubmit={handleViolationAutoSubmit}
     >
       <div className="min-h-screen bg-gray-900 text-white">
+        {/* Section progress bar */}
+        {multiSection && (
+          <div className="bg-gray-850 border-b border-gray-700 px-6 py-2 flex items-center gap-2">
+            {sections.map((s, i) => (
+              <div key={i} className="flex items-center gap-2">
+                {i > 0 && <ArrowRight className="w-3 h-3 text-gray-600" />}
+                <span className={`text-xs px-3 py-1 rounded-full font-medium ${
+                  i === currentSectionIndex
+                    ? 'bg-indigo-600 text-white'
+                    : i < currentSectionIndex
+                    ? 'bg-gray-700 text-gray-400 line-through'
+                    : 'bg-gray-800 text-gray-500'
+                }`}>
+                  {s.label || `Section ${i + 1}`} ({s.type}, {s.durationMinutes}min)
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Top bar */}
         <div className="bg-gray-800 border-b border-gray-700 px-6 py-3 flex items-center justify-between sticky top-0 z-30">
           <div className="flex items-center gap-4">
             <h1 className="font-semibold text-lg">{exam.title}</h1>
-            {/* Section tabs */}
-            {hasCoding && hasQuiz && (
-              <div className="flex bg-gray-700 rounded-lg p-0.5">
-                <button
-                  onClick={() => setActiveTab('coding')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                    activeTab === 'coding' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'
-                  }`}
-                >
-                  <FileCode className="w-3.5 h-3.5" /> Coding
-                </button>
-                <button
-                  onClick={() => setActiveTab('quiz')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                    activeTab === 'quiz' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'
-                  }`}
-                >
-                  <CircleDot className="w-3.5 h-3.5" /> Quiz
-                </button>
-              </div>
+            {currentSection && (
+              <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${currentSection.type === 'coding' ? 'bg-blue-900/40 text-blue-300' : 'bg-purple-900/40 text-purple-300'}`}>
+                {currentSection.label || `Section ${currentSectionIndex + 1}`}
+              </span>
             )}
           </div>
           <div className="flex items-center gap-6">
@@ -319,7 +320,7 @@ export default function ExamPage() {
               <Clock className="w-4 h-4 text-red-400" />
               <span className="font-mono text-red-400 font-bold">{timeLeft}</span>
             </div>
-            {activeTab === 'coding' && hasCoding && (
+            {!isMCQ && (
               <select
                 value={language}
                 onChange={(e) => setLanguage(e.target.value)}
@@ -329,6 +330,15 @@ export default function ExamPage() {
                 <option value="java">Java 17</option>
               </select>
             )}
+            {multiSection && !isLastSection ? (
+              <button
+                onClick={() => setShowNextSectionConfirm(true)}
+                className="flex items-center gap-2 px-4 py-1.5 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
+              >
+                <ArrowRight className="w-4 h-4" />
+                Next Section
+              </button>
+            ) : null}
             <button
               onClick={() => setShowFinishConfirm(true)}
               className="flex items-center gap-2 px-4 py-1.5 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors"
@@ -339,40 +349,39 @@ export default function ExamPage() {
           </div>
         </div>
 
-        {/* Coding Section */}
-        {activeTab === 'coding' && hasCoding && problem && (
-          <div className="flex h-[calc(100vh-57px)]">
-            {/* Left: Problem */}
-            <div className="w-1/2 overflow-y-auto p-6 border-r border-gray-700">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <h2 className="text-xl font-bold">{problem.title}</h2>
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize ${difficultyColor(problem.difficulty)}`}>
-                    {problem.difficulty}
-                  </span>
-                </div>
-                <span className="text-sm text-gray-400">
-                  Problem {currentProblem + 1} of {problems.length}
+        <div className="flex h-[calc(100vh-57px)]" style={multiSection ? { height: 'calc(100vh - 93px)' } : {}}>
+          {/* Left: Problem description */}
+          <div className={`${isMCQ ? 'w-full' : 'w-1/2'} overflow-y-auto p-6 ${!isMCQ ? 'border-r border-gray-700' : ''}`}>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <h2 className="text-xl font-bold">{problem.title}</h2>
+                <span className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize ${difficultyColor(problem.difficulty)}`}>
+                  {problem.difficulty}
                 </span>
               </div>
+              <span className="text-sm text-gray-400">
+                {currentProblem + 1} of {problems.length}
+              </span>
+            </div>
 
-              <div className="prose prose-invert prose-sm max-w-none">
-                <div className="whitespace-pre-wrap text-gray-300">{problem.description}</div>
+            <div className="prose prose-invert prose-sm max-w-none">
+              <div className="whitespace-pre-wrap text-gray-300">{problem.description}</div>
 
-                {problem.constraints && (
-                  <div className="mt-4">
-                    <h3 className="text-sm font-semibold text-gray-200 mb-1">Constraints</h3>
-                    <div className="whitespace-pre-wrap text-gray-400 text-sm">{problem.constraints}</div>
-                  </div>
-                )}
+              {!isMCQ && problem.constraints && (
+                <div className="mt-4">
+                  <h3 className="text-sm font-semibold text-gray-200 mb-1">Constraints</h3>
+                  <div className="whitespace-pre-wrap text-gray-400 text-sm">{problem.constraints}</div>
+                </div>
+              )}
 
+              {!isMCQ && problem.sampleTestCases && problem.sampleTestCases.length > 0 && (
                 <div className="mt-4 space-y-3">
                   <h3 className="text-sm font-semibold text-gray-200">Sample Test Cases</h3>
                   {problem.sampleTestCases.map((tc, i) => (
                     <div key={i} className="bg-gray-800 rounded-lg p-3 space-y-2">
                       <div>
                         <span className="text-xs text-gray-400">Input:</span>
-                        <pre className="text-sm text-green-400 mt-0.5">{tc.input}</pre>
+                        <pre className="text-sm text-green-400 mt-0.5">{tc.input || '(none)'}</pre>
                       </div>
                       <div>
                         <span className="text-xs text-gray-400">Output:</span>
@@ -381,40 +390,92 @@ export default function ExamPage() {
                     </div>
                   ))}
                 </div>
-              </div>
+              )}
 
-              <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-700">
-                <button
-                  onClick={() => setCurrentProblem(Math.max(0, currentProblem - 1))}
-                  disabled={currentProblem === 0}
-                  className="flex items-center gap-1 px-3 py-2 bg-gray-800 rounded-lg text-sm hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <ChevronLeft className="w-4 h-4" /> Previous
-                </button>
-                <div className="flex gap-2">
-                  {problems.map((_, i) => (
-                    <button
-                      key={i}
-                      onClick={() => setCurrentProblem(i)}
-                      className={`w-8 h-8 rounded-lg text-sm font-medium ${
-                        i === currentProblem ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+              {isMCQ && problem.options && (
+                <div className="mt-6 space-y-3">
+                  {(['a', 'b', 'c', 'd'] as const).map((key) => (
+                    <label
+                      key={key}
+                      className={`flex items-center gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                        mcqAnswers[problem._id] === key
+                          ? 'border-indigo-500 bg-indigo-900/30'
+                          : 'border-gray-700 bg-gray-800 hover:border-gray-600'
                       }`}
                     >
-                      {i + 1}
-                    </button>
+                      <input
+                        type="radio"
+                        name={`mcq-${problem._id}`}
+                        value={key}
+                        checked={mcqAnswers[problem._id] === key}
+                        onChange={() => setMcqAnswers((prev) => ({ ...prev, [problem._id]: key }))}
+                        className="w-4 h-4 text-indigo-600"
+                      />
+                      <span className="font-semibold text-gray-400 uppercase w-6">{key}.</span>
+                      <span className="text-gray-200">{problem.options?.[key]}</span>
+                      {mcqAnswers[problem._id] === key && (
+                        <CheckCircle className="w-5 h-5 text-indigo-400 ml-auto" />
+                      )}
+                    </label>
                   ))}
                 </div>
-                <button
-                  onClick={() => setCurrentProblem(Math.min(problems.length - 1, currentProblem + 1))}
-                  disabled={currentProblem === problems.length - 1}
-                  className="flex items-center gap-1 px-3 py-2 bg-gray-800 rounded-lg text-sm hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Next <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
+              )}
             </div>
 
-            {/* Right: Editor + Submit */}
+            {/* Problem navigation */}
+            <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-700">
+              <button
+                onClick={() => { setCurrentProblem(Math.max(0, currentProblem - 1)); setLastResult(null); }}
+                disabled={currentProblem === 0}
+                className="flex items-center gap-1 px-3 py-2 bg-gray-800 rounded-lg text-sm hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft className="w-4 h-4" /> Previous
+              </button>
+              <div className="flex gap-2 flex-wrap justify-center">
+                {problems.map((_, i) => (
+                  <button
+                    key={i}
+                    onClick={() => { setCurrentProblem(i); setLastResult(null); }}
+                    className={`w-8 h-8 rounded-lg text-sm font-medium ${
+                      i === currentProblem ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                    }`}
+                  >
+                    {i + 1}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => { setCurrentProblem(Math.min(problems.length - 1, currentProblem + 1)); setLastResult(null); }}
+                disabled={currentProblem === problems.length - 1}
+                className="flex items-center gap-1 px-3 py-2 bg-gray-800 rounded-lg text-sm hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Next <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+
+            {isMCQ && (
+              <div className="mt-4 flex items-center justify-between">
+                <span className="text-sm text-gray-400">
+                  Warnings: {session?.violationCount || 0} / {exam.maxViolations}
+                </span>
+                <button onClick={handleSubmit} disabled={submitting}
+                  className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors text-sm font-medium disabled:opacity-50">
+                  {submitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Submitting...</> : <><Send className="w-4 h-4" /> Submit Answer</>}
+                </button>
+              </div>
+            )}
+
+            {isMCQ && lastResult && (
+              <div className={`mt-3 px-4 py-3 rounded-xl border ${statusColor(lastResult.status)}`}>
+                <span className="font-semibold text-sm">
+                  {lastResult.status === 'AC' ? 'Correct!' : 'Incorrect'}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Right: Editor (coding only) */}
+          {!isMCQ && (
             <div className="w-1/2 flex flex-col">
               <div className="flex-1 overflow-hidden">
                 <CodeEditor
@@ -429,7 +490,9 @@ export default function ExamPage() {
                   <div className="flex items-center justify-between text-sm">
                     <span className="font-semibold">Result: {lastResult.status}</span>
                     <span>{lastResult.details}</span>
-                    {lastResult.executionTime > 0 && <span>Time: {lastResult.executionTime}s</span>}
+                    {lastResult.executionTime && lastResult.executionTime > 0 && (
+                      <span>Time: {lastResult.executionTime}s</span>
+                    )}
                   </div>
                 </div>
               )}
@@ -438,161 +501,42 @@ export default function ExamPage() {
                 <span className="text-sm text-gray-400">
                   Warnings: {session?.violationCount || 0} / {exam.maxViolations}
                 </span>
-                <button
-                  onClick={handleSubmit}
-                  disabled={submitting}
-                  className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors text-sm font-medium disabled:opacity-50"
-                >
-                  {submitting ? (
-                    <><Loader2 className="w-4 h-4 animate-spin" /> Evaluating...</>
-                  ) : (
-                    <><Send className="w-4 h-4" /> Submit</>
-                  )}
+                <button onClick={handleSubmit} disabled={submitting}
+                  className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors text-sm font-medium disabled:opacity-50">
+                  {submitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Evaluating...</> : <><Send className="w-4 h-4" /> Submit</>}
                 </button>
               </div>
             </div>
-          </div>
-        )}
-
-        {/* Quiz Section */}
-        {activeTab === 'quiz' && hasQuiz && currentQuiz && (
-          <div className="h-[calc(100vh-57px)] overflow-y-auto">
-            <div className="max-w-3xl mx-auto py-6 px-4">
-              {/* Quiz selector (if multiple) */}
-              {quizzes.length > 1 && (
-                <div className="flex gap-2 mb-6">
-                  {quizzes.map((q, i) => {
-                    const sub = quizSubmissions[q._id];
-                    return (
-                      <button
-                        key={q._id}
-                        onClick={() => setCurrentQuizIndex(i)}
-                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                          i === currentQuizIndex
-                            ? 'bg-indigo-600 text-white'
-                            : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-                        }`}
-                      >
-                        {q.title}
-                        {sub && (
-                          <span className="ml-2 text-xs opacity-75">({sub.score}/{sub.maxScore})</span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h2 className="text-xl font-bold">{currentQuiz.title}</h2>
-                  {currentQuiz.description && (
-                    <p className="text-sm text-gray-400 mt-1">{currentQuiz.description}</p>
-                  )}
-                </div>
-                <div className="text-right">
-                  <div className="text-sm text-gray-400">
-                    {currentQuiz.questions.length} questions &middot;{' '}
-                    {currentQuiz.questions.reduce((s, q) => s + q.score, 0)} pts total
-                  </div>
-                  {quizSubmissions[currentQuiz._id] && (
-                    <div className="text-sm font-semibold text-green-400 mt-0.5">
-                      Score: {quizSubmissions[currentQuiz._id].score}/{quizSubmissions[currentQuiz._id].maxScore}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Questions */}
-              <div className="space-y-4">
-                {currentQuiz.questions.map((question, qIndex) => {
-                  const selectedOpt = quizAnswers[currentQuiz._id]?.[question._id];
-                  return (
-                    <div key={question._id} className="bg-gray-800 rounded-xl p-5 border border-gray-700">
-                      <div className="flex items-start justify-between mb-3">
-                        <h3 className="text-sm font-medium text-white flex-1">
-                          <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-indigo-600/30 text-indigo-400 text-xs font-bold mr-2">
-                            {qIndex + 1}
-                          </span>
-                          {question.questionText}
-                        </h3>
-                        <span className="text-xs text-gray-500 ml-3 flex-shrink-0">{question.score} pt{question.score !== 1 ? 's' : ''}</span>
-                      </div>
-                      <div className="space-y-2 ml-8">
-                        {question.options.map((opt, oIndex) => {
-                          const isSelected = selectedOpt === oIndex;
-                          return (
-                            <button
-                              key={oIndex}
-                              type="button"
-                              onClick={() => handleSelectAnswer(currentQuiz._id, question._id, oIndex)}
-                              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-left transition-all ${
-                                isSelected
-                                  ? 'bg-indigo-600/20 border border-indigo-500 text-white'
-                                  : 'bg-gray-700/50 border border-gray-600 text-gray-300 hover:bg-gray-700 hover:border-gray-500'
-                              }`}
-                            >
-                              {isSelected ? (
-                                <CheckCircle2 className="w-4 h-4 text-indigo-400 flex-shrink-0" />
-                              ) : (
-                                <Circle className="w-4 h-4 text-gray-500 flex-shrink-0" />
-                              )}
-                              <span className="w-5 text-xs font-bold text-gray-500">{optionLabels[oIndex]}</span>
-                              {opt.text}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Quiz submit bar */}
-              <div className="mt-6 flex items-center justify-between bg-gray-800 rounded-xl p-4 border border-gray-700">
-                <div className="text-sm text-gray-400">
-                  Answered: {Object.keys(quizAnswers[currentQuiz._id] || {}).length}/{currentQuiz.questions.length}
-                </div>
-                <button
-                  onClick={() => handleSubmitQuiz(currentQuiz._id)}
-                  disabled={submittingQuiz}
-                  className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors text-sm font-medium disabled:opacity-50"
-                >
-                  {submittingQuiz ? (
-                    <><Loader2 className="w-4 h-4 animate-spin" /> Submitting...</>
-                  ) : quizSubmissions[currentQuiz._id] ? (
-                    <><Send className="w-4 h-4" /> Resubmit Quiz</>
-                  ) : (
-                    <><Send className="w-4 h-4" /> Submit Quiz</>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* If only quizzes and on coding tab, or only coding and on quiz tab — auto-redirect handled above */}
-        {activeTab === 'coding' && !hasCoding && hasQuiz && (
-          <div className="flex items-center justify-center h-[calc(100vh-57px)]">
-            <div className="text-center">
-              <p className="text-gray-400 mb-4">This exam has no coding problems.</p>
-              <button onClick={() => setActiveTab('quiz')} className="px-4 py-2 bg-indigo-600 rounded-lg text-sm">
-                Go to Quiz
-              </button>
-            </div>
-          </div>
-        )}
-        {activeTab === 'quiz' && !hasQuiz && hasCoding && (
-          <div className="flex items-center justify-center h-[calc(100vh-57px)]">
-            <div className="text-center">
-              <p className="text-gray-400 mb-4">This exam has no quizzes.</p>
-              <button onClick={() => setActiveTab('coding')} className="px-4 py-2 bg-indigo-600 rounded-lg text-sm">
-                Go to Coding
-              </button>
-            </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
+
+      {/* Next Section Confirmation Modal */}
+      {showNextSectionConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full mx-4 border border-gray-700">
+            <div className="p-6">
+              <h2 className="text-xl font-bold text-white mb-2">Move to Next Section?</h2>
+              <p className="text-gray-400 mb-1">
+                You are about to move from <strong>{sections[currentSectionIndex]?.label || `Section ${currentSectionIndex + 1}`}</strong> to <strong>{sections[currentSectionIndex + 1]?.label || `Section ${currentSectionIndex + 2}`}</strong>.
+              </p>
+              <p className="text-yellow-400 text-sm font-medium">
+                You will NOT be able to return to the current section. All unsaved work in this section will be lost.
+              </p>
+            </div>
+            <div className="flex gap-3 px-6 pb-6">
+              <button onClick={() => setShowNextSectionConfirm(false)} disabled={advancing}
+                className="flex-1 py-2.5 bg-gray-700 text-gray-300 font-medium rounded-xl hover:bg-gray-600 transition-colors disabled:opacity-50">
+                Stay
+              </button>
+              <button onClick={handleAdvanceSection} disabled={advancing}
+                className="flex-1 py-2.5 bg-indigo-600 text-white font-medium rounded-xl hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
+                {advancing ? <><Loader2 className="w-4 h-4 animate-spin" /> Moving...</> : 'Yes, Next Section'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Finish Exam Confirmation Modal */}
       {showFinishConfirm && (
@@ -604,27 +548,17 @@ export default function ExamPage() {
                 Are you sure you want to finish and submit this exam?
               </p>
               <p className="text-red-400 text-sm font-medium">
-                This action cannot be undone. You will not be able to submit any more solutions after this.
+                This action cannot be undone. You will not be able to submit any more solutions.
               </p>
             </div>
             <div className="flex gap-3 px-6 pb-6">
-              <button
-                onClick={() => setShowFinishConfirm(false)}
-                disabled={finishing}
-                className="flex-1 py-2.5 bg-gray-700 text-gray-300 font-medium rounded-xl hover:bg-gray-600 transition-colors disabled:opacity-50"
-              >
+              <button onClick={() => setShowFinishConfirm(false)} disabled={finishing}
+                className="flex-1 py-2.5 bg-gray-700 text-gray-300 font-medium rounded-xl hover:bg-gray-600 transition-colors disabled:opacity-50">
                 Cancel
               </button>
-              <button
-                onClick={handleFinishExam}
-                disabled={finishing}
-                className="flex-1 py-2.5 bg-red-600 text-white font-medium rounded-xl hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {finishing ? (
-                  <><Loader2 className="w-4 h-4 animate-spin" /> Submitting...</>
-                ) : (
-                  'Yes, Finish Exam'
-                )}
+              <button onClick={handleFinishExam} disabled={finishing}
+                className="flex-1 py-2.5 bg-red-600 text-white font-medium rounded-xl hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
+                {finishing ? <><Loader2 className="w-4 h-4 animate-spin" /> Submitting...</> : 'Yes, Finish Exam'}
               </button>
             </div>
           </div>

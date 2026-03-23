@@ -18,10 +18,14 @@ router.use(auth, requireRole('admin'));
 router.post('/students', validateStudent, adminController.createStudent);
 router.post('/students/bulk', upload.single('file'), adminController.bulkUploadStudents);
 router.get('/students', adminController.getStudents);
+router.put('/students/:id', validateMongoId, adminController.updateStudent);
+router.get('/students/batches', adminController.getStudentBatches);
 
 // Problems
 router.post('/problems', validateProblem, adminController.createProblem);
+router.post('/problems/bulk', upload.single('file'), adminController.bulkUploadProblems);
 router.get('/problems', adminController.getProblems);
+router.get('/problems/filters', adminController.getProblemFilters);
 router.get('/problems/:id', validateMongoId, adminController.getProblemById);
 router.put('/problems/:id', validateMongoId, adminController.updateProblem);
 

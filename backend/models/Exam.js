@@ -1,5 +1,37 @@
 const mongoose = require('mongoose');
 
+const sectionSchema = new mongoose.Schema(
+  {
+    label: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    type: {
+      type: String,
+      enum: ['coding', 'mcq'],
+      required: true,
+    },
+    durationMinutes: {
+      type: Number,
+      required: true,
+      min: 1,
+    },
+    problems: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Problem',
+      },
+    ],
+    randomCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+  },
+  { _id: true }
+);
+
 const examSchema = new mongoose.Schema(
   {
     title: {
@@ -16,18 +48,13 @@ const examSchema = new mongoose.Schema(
       type: Date,
       required: [true, 'End time is required'],
     },
-    problems: [
-      {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Problem',
+    sections: {
+      type: [sectionSchema],
+      validate: {
+        validator: (v) => v.length > 0,
+        message: 'At least one section is required',
       },
-    ],
-    quizzes: [
-      {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Quiz',
-      },
-    ],
+    },
     allowedStudents: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -52,6 +79,10 @@ examSchema.pre('validate', function (next) {
     this.invalidate('endTime', 'End time must be after start time');
   }
   next();
+});
+
+examSchema.virtual('totalDurationMinutes').get(function () {
+  return (this.sections || []).reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
 });
 
 examSchema.index({ startTime: 1, endTime: 1 });

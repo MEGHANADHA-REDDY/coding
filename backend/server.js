@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
+const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const connectDB = require('./config/db');
 
@@ -11,12 +12,14 @@ const adminRoutes = require('./routes/admin');
 const examRoutes = require('./routes/exam');
 const submissionRoutes = require('./routes/submission');
 const leaderboardRoutes = require('./routes/leaderboard');
+const { getQueueStats } = require('./services/judge0');
 
 const app = express();
 
 connectDB();
 
 app.use(helmet());
+app.use(compression());
 app.use(cors({
   origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
   credentials: true,
@@ -25,23 +28,54 @@ app.use(morgan('dev'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-const limiter = rateLimit({
+app.use((req, res, next) => {
+  req.setTimeout(120000);
+  res.setTimeout(120000);
+  next();
+});
+
+const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 500,
+  max: 1500,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later.' },
 });
-app.use('/api/', limiter);
+app.use('/api/', globalLimiter);
+
+const submissionLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id || req.ip,
+  message: { error: 'Too many submissions. Please wait before submitting again.' },
+});
+
+const examStartLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id || req.ip,
+  message: { error: 'Too many start requests. Please wait.' },
+});
 
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/exams', examRoutes);
-app.use('/api/submissions', submissionRoutes);
+app.use('/api/submissions', submissionLimiter, submissionRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);
 
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  const queue = getQueueStats();
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    judge0Queue: queue,
+    uptime: Math.round(process.uptime()),
+    memoryMB: Math.round(process.memoryUsage().rss / 1024 / 1024),
+  });
 });
 
 app.use((_req, res) => {
@@ -53,10 +87,16 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
+app.locals.examStartLimiter = examStartLimiter;
+
 const PORT = process.env.PORT || 5000;
 const server = app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
+server.keepAliveTimeout = 65000;
+server.headersTimeout = 66000;
+server.maxConnections = 500;
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
@@ -64,6 +104,31 @@ server.on('error', (err) => {
     process.exit(1);
   }
   throw err;
+});
+
+function gracefulShutdown(signal) {
+  console.log(`\n${signal} received. Shutting down gracefully...`);
+  server.close(() => {
+    console.log('HTTP server closed.');
+    const mongoose = require('mongoose');
+    mongoose.connection.close(false).then(() => {
+      console.log('MongoDB connection closed.');
+      process.exit(0);
+    });
+  });
+  setTimeout(() => {
+    console.error('Forced shutdown after timeout.');
+    process.exit(1);
+  }, 10000);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception:', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled rejection:', reason);
 });
 
 module.exports = app;

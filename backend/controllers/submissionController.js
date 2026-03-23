@@ -12,47 +12,84 @@ exports.submitCode = async (req, res) => {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { examId, problemId, language, code } = req.body;
+    const { examId, problemId, language, code, selectedAnswer } = req.body;
     const studentId = req.user.id;
 
-    // Validate exam exists and is active
     const exam = await Exam.findById(examId);
     if (!exam || !exam.isActive) {
       return res.status(404).json({ error: 'Exam not found or not active.' });
     }
 
-    // Validate time window
     const now = new Date();
     if (now < exam.startTime || now > exam.endTime) {
       return res.status(403).json({ error: 'Exam is not within the valid time window.' });
     }
 
-    // Validate student is allowed
     if (!exam.allowedStudents.map((id) => id.toString()).includes(studentId)) {
       return res.status(403).json({ error: 'You are not allowed to submit to this exam.' });
     }
 
-    // Validate problem belongs to exam
-    if (!exam.problems.map((id) => id.toString()).includes(problemId)) {
-      return res.status(400).json({ error: 'Problem does not belong to this exam.' });
-    }
-
-    // Validate session exists and not submitted
     const session = await ExamSession.findOne({ examId, studentId });
     if (!session) {
       return res.status(403).json({ error: 'You must start the exam first.' });
     }
     if (session.isSubmitted) {
-      return res.status(403).json({ error: 'Exam already submitted. Cannot submit more code.' });
+      return res.status(403).json({ error: 'Exam already submitted. Cannot submit more.' });
     }
 
-    // Fetch problem with hidden test cases
+    const sectionIndex = session.currentSection;
+    const assignedSection = session.assignedSections[sectionIndex];
+    if (!assignedSection) {
+      return res.status(400).json({ error: 'Invalid section state.' });
+    }
+
+    const sectionProblemIds = assignedSection.problems.map((id) => id.toString());
+    if (!sectionProblemIds.includes(problemId)) {
+      return res.status(400).json({ error: 'Problem does not belong to the current section.' });
+    }
+
+    const examSection = exam.sections[sectionIndex];
+    if (examSection) {
+      const sectionDeadline = new Date(session.sectionStartedAt.getTime() + examSection.durationMinutes * 60000);
+      if (now > sectionDeadline) {
+        return res.status(403).json({ error: 'Section time has expired. Please advance to the next section.' });
+      }
+    }
+
     const problem = await Problem.findById(problemId);
     if (!problem) {
       return res.status(404).json({ error: 'Problem not found.' });
     }
 
-    // Create submission as PENDING
+    if (problem.type === 'mcq') {
+      if (!selectedAnswer) {
+        return res.status(400).json({ error: 'Selected answer is required for MCQ.' });
+      }
+
+      const isCorrect = selectedAnswer.toLowerCase() === problem.correctAnswer.toLowerCase();
+
+      const submission = await Submission.create({
+        examId,
+        problemId,
+        studentId,
+        selectedAnswer: selectedAnswer.toLowerCase(),
+        status: isCorrect ? 'AC' : 'WA',
+      });
+
+      return res.json({
+        submission: {
+          _id: submission._id,
+          status: submission.status,
+          selectedAnswer: submission.selectedAnswer,
+          createdAt: submission.createdAt,
+        },
+      });
+    }
+
+    if (!language || !code) {
+      return res.status(400).json({ error: 'Language and code are required for coding problems.' });
+    }
+
     const submission = await Submission.create({
       examId,
       problemId,
@@ -62,7 +99,6 @@ exports.submitCode = async (req, res) => {
       status: 'PENDING',
     });
 
-    // Evaluate against hidden test cases
     try {
       const result = await evaluateSubmission(code, language, problem.hiddenTestCases);
 
@@ -116,7 +152,7 @@ exports.getSubmissionHistory = async (req, res) => {
     const studentId = req.user.id;
 
     const submissions = await Submission.find({ examId, studentId })
-      .populate('problemId', 'title')
+      .populate('problemId', 'title type')
       .sort({ createdAt: -1 });
 
     res.json({ submissions });

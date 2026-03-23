@@ -1,10 +1,18 @@
 const { validationResult } = require('express-validator');
+const crypto = require('crypto');
 const Exam = require('../models/Exam');
 const ExamSession = require('../models/ExamSession');
+const Problem = require('../models/Problem');
 const Violation = require('../models/Violation');
-const Submission = require('../models/Submission');
-const Quiz = require('../models/Quiz');
-const QuizSubmission = require('../models/QuizSubmission');
+
+function fisherYatesShuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = crypto.randomInt(0, i + 1);
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
 
 exports.getAvailableExams = async (req, res) => {
   try {
@@ -15,17 +23,25 @@ exports.getAvailableExams = async (req, res) => {
       startTime: { $lte: now },
       endTime: { $gte: now },
     })
-      .select('title startTime endTime maxViolations problems quizzes')
-      .sort({ startTime: 1 });
+      .select('title startTime endTime maxViolations sections')
+      .sort({ startTime: 1 })
+      .lean();
 
     const examsWithSession = await Promise.all(
       exams.map(async (exam) => {
         const session = await ExamSession.findOne({
           examId: exam._id,
           studentId: req.user.id,
-        });
+        }).lean();
+        const totalDuration = exam.sections.reduce((s, sec) => s + sec.durationMinutes, 0);
         return {
-          ...exam.toObject(),
+          _id: exam._id,
+          title: exam.title,
+          startTime: exam.startTime,
+          endTime: exam.endTime,
+          maxViolations: exam.maxViolations,
+          totalDurationMinutes: totalDuration,
+          sectionCount: exam.sections.length,
           hasStarted: !!session,
           isSubmitted: session?.isSubmitted || false,
         };
@@ -69,7 +85,25 @@ exports.startExam = async (req, res) => {
     }
 
     if (!session) {
-      session = await ExamSession.create({ examId, studentId });
+      const assignedSections = [];
+
+      for (const section of exam.sections) {
+        let problemIds = section.problems.map((id) => id);
+
+        if (section.randomCount > 0 && section.randomCount < section.problems.length) {
+          problemIds = fisherYatesShuffle(section.problems).slice(0, section.randomCount);
+        }
+
+        assignedSections.push({ problems: problemIds });
+      }
+
+      session = await ExamSession.create({
+        examId,
+        studentId,
+        currentSection: 0,
+        sectionStartedAt: now,
+        assignedSections,
+      });
     }
 
     res.json({ session });
@@ -84,10 +118,7 @@ exports.getExamProblems = async (req, res) => {
     const { examId } = req.params;
     const studentId = req.user.id;
 
-    const exam = await Exam.findById(examId)
-      .populate('problems', 'title description constraints difficulty sampleTestCases')
-      .populate('quizzes', 'title description questions');
-
+    const exam = await Exam.findById(examId);
     if (!exam) {
       return res.status(404).json({ error: 'Exam not found.' });
     }
@@ -105,32 +136,35 @@ exports.getExamProblems = async (req, res) => {
       return res.status(403).json({ error: 'Exam already submitted.' });
     }
 
-    const quizzesForStudent = (exam.quizzes || []).map((quiz) => ({
-      _id: quiz._id,
-      title: quiz.title,
-      description: quiz.description,
-      questions: quiz.questions.map((q) => ({
-        _id: q._id,
-        questionText: q.questionText,
-        options: q.options,
-        score: q.score,
-      })),
-    }));
+    const sectionIndex = session.currentSection;
+    const examSection = exam.sections[sectionIndex];
+    const assignedSection = session.assignedSections[sectionIndex];
 
-    const existingQuizSubs = await QuizSubmission.find({ examId, studentId })
-      .select('quizId answers score maxScore');
+    if (!examSection || !assignedSection) {
+      return res.status(400).json({ error: 'Invalid section state.' });
+    }
+
+    const problemIds = assignedSection.problems;
+    const problems = await Problem.find({ _id: { $in: problemIds } })
+      .select('title description constraints difficulty type sampleTestCases options boilerplateCode')
+      .lean();
+
+    const sections = exam.sections.map((s, i) => ({
+      label: s.label || `Section ${i + 1}`,
+      type: s.type,
+      durationMinutes: s.durationMinutes,
+    }));
 
     res.json({
       exam: {
         _id: exam._id,
         title: exam.title,
-        startTime: exam.startTime,
-        endTime: exam.endTime,
         maxViolations: exam.maxViolations,
       },
-      problems: exam.problems,
-      quizzes: quizzesForStudent,
-      quizSubmissions: existingQuizSubs,
+      sections,
+      currentSection: sectionIndex,
+      sectionStartedAt: session.sectionStartedAt,
+      problems,
       session: {
         violationCount: session.violationCount,
         isSubmitted: session.isSubmitted,
@@ -139,6 +173,50 @@ exports.getExamProblems = async (req, res) => {
   } catch (error) {
     console.error('Get exam problems error:', error);
     res.status(500).json({ error: 'Failed to fetch exam problems.' });
+  }
+};
+
+exports.advanceSection = async (req, res) => {
+  try {
+    const { examId } = req.params;
+    const studentId = req.user.id;
+
+    const session = await ExamSession.findOne({ examId, studentId });
+    if (!session) {
+      return res.status(404).json({ error: 'Exam session not found.' });
+    }
+
+    if (session.isSubmitted) {
+      return res.status(403).json({ error: 'Exam already submitted.' });
+    }
+
+    const exam = await Exam.findById(examId);
+    if (!exam) {
+      return res.status(404).json({ error: 'Exam not found.' });
+    }
+
+    const nextSection = session.currentSection + 1;
+
+    if (nextSection >= exam.sections.length) {
+      session.isSubmitted = true;
+      session.endedAt = new Date();
+      await session.save();
+      return res.json({ message: 'All sections complete. Exam submitted.', submitted: true });
+    }
+
+    session.currentSection = nextSection;
+    session.sectionStartedAt = new Date();
+    await session.save();
+
+    res.json({
+      message: `Advanced to section ${nextSection + 1}.`,
+      submitted: false,
+      currentSection: nextSection,
+      sectionStartedAt: session.sectionStartedAt,
+    });
+  } catch (error) {
+    console.error('Advance section error:', error);
+    res.status(500).json({ error: 'Failed to advance section.' });
   }
 };
 
@@ -187,95 +265,6 @@ exports.reportViolation = async (req, res) => {
   }
 };
 
-exports.submitQuiz = async (req, res) => {
-  try {
-    const { examId } = req.params;
-    const studentId = req.user.id;
-    const { quizId, answers } = req.body;
-
-    const exam = await Exam.findById(examId);
-    if (!exam || !exam.isActive) {
-      return res.status(404).json({ error: 'Exam not found or not active.' });
-    }
-
-    const now = new Date();
-    if (now < exam.startTime || now > exam.endTime) {
-      return res.status(403).json({ error: 'Exam is not within the valid time window.' });
-    }
-
-    if (!exam.allowedStudents.map((id) => id.toString()).includes(studentId)) {
-      return res.status(403).json({ error: 'You are not allowed to submit to this exam.' });
-    }
-
-    if (!exam.quizzes.map((id) => id.toString()).includes(quizId)) {
-      return res.status(400).json({ error: 'Quiz does not belong to this exam.' });
-    }
-
-    const session = await ExamSession.findOne({ examId, studentId });
-    if (!session) {
-      return res.status(403).json({ error: 'You must start the exam first.' });
-    }
-    if (session.isSubmitted) {
-      return res.status(403).json({ error: 'Exam already submitted. Cannot submit quiz.' });
-    }
-
-    const quiz = await Quiz.findById(quizId);
-    if (!quiz) {
-      return res.status(404).json({ error: 'Quiz not found.' });
-    }
-
-    let earnedScore = 0;
-    let correctCount = 0;
-    const maxScore = quiz.questions.reduce((sum, q) => sum + (q.score || 1), 0);
-
-    const gradedAnswers = (answers || []).map((ans) => {
-      const question = quiz.questions.id(ans.questionId);
-      if (question && ans.selectedOption === question.correctOption) {
-        earnedScore += question.score || 1;
-        correctCount++;
-      }
-      return { questionId: ans.questionId, selectedOption: ans.selectedOption };
-    });
-
-    const existing = await QuizSubmission.findOne({ examId, quizId, studentId });
-    let quizSubmission;
-
-    if (existing) {
-      existing.answers = gradedAnswers;
-      existing.score = earnedScore;
-      existing.maxScore = maxScore;
-      existing.correctCount = correctCount;
-      existing.totalQuestions = quiz.questions.length;
-      quizSubmission = await existing.save();
-    } else {
-      quizSubmission = await QuizSubmission.create({
-        examId,
-        quizId,
-        studentId,
-        answers: gradedAnswers,
-        score: earnedScore,
-        maxScore,
-        correctCount,
-        totalQuestions: quiz.questions.length,
-      });
-    }
-
-    res.json({
-      quizSubmission: {
-        _id: quizSubmission._id,
-        quizId: quizSubmission.quizId,
-        score: quizSubmission.score,
-        maxScore: quizSubmission.maxScore,
-        correctCount: quizSubmission.correctCount,
-        totalQuestions: quizSubmission.totalQuestions,
-      },
-    });
-  } catch (error) {
-    console.error('Submit quiz error:', error);
-    res.status(500).json({ error: 'Failed to submit quiz.' });
-  }
-};
-
 exports.autoSubmitExam = async (req, res) => {
   try {
     const { examId } = req.params;
@@ -294,9 +283,9 @@ exports.autoSubmitExam = async (req, res) => {
     session.endedAt = new Date();
     await session.save();
 
-    res.json({ message: 'Exam auto-submitted due to violations.', session });
+    res.json({ message: 'Exam submitted successfully.', session });
   } catch (error) {
     console.error('Auto-submit error:', error);
-    res.status(500).json({ error: 'Failed to auto-submit exam.' });
+    res.status(500).json({ error: 'Failed to submit exam.' });
   }
 };

@@ -33,6 +33,16 @@ const userSchema = new mongoose.Schema(
       trim: true,
       sparse: true,
     },
+    batch: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    mobileNumber: {
+      type: String,
+      trim: true,
+      default: '',
+    },
   },
   { timestamps: true }
 );
@@ -53,5 +63,7 @@ userSchema.methods.toJSON = function () {
   delete obj.password;
   return obj;
 };
+
+userSchema.index({ role: 1, batch: 1 });
 
 module.exports = mongoose.model('User', userSchema);

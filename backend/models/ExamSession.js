@@ -1,5 +1,17 @@
 const mongoose = require('mongoose');
 
+const assignedSectionSchema = new mongoose.Schema(
+  {
+    problems: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Problem',
+      },
+    ],
+  },
+  { _id: false }
+);
+
 const examSessionSchema = new mongoose.Schema(
   {
     examId: {
@@ -28,6 +40,15 @@ const examSessionSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    currentSection: {
+      type: Number,
+      default: 0,
+    },
+    sectionStartedAt: {
+      type: Date,
+      default: Date.now,
+    },
+    assignedSections: [assignedSectionSchema],
   },
   { timestamps: true }
 );

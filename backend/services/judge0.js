@@ -108,14 +108,17 @@ async function pollBatchResults(tokens) {
 function processResult(result, testCaseIndex, expectedOutput) {
   const statusId = result.status?.id;
 
-  if (statusId === 6) {
-    return { done: true, status: 'CE', executionTime: 0, details: result.compile_output || 'Compilation error' };
-  }
-  if (statusId >= 7 && statusId <= 12) {
-    return { done: true, status: 'RE', executionTime: parseFloat(result.time) || 0, details: result.stderr || 'Runtime error' };
-  }
-  if (statusId === 5) {
-    return { done: true, status: 'TLE', executionTime: parseFloat(result.time) || 0, details: 'Time limit exceeded' };
+  if (statusId !== 3 && statusId !== 4) {
+    if (statusId === 6) {
+      return { done: true, status: 'CE', executionTime: 0, details: result.compile_output || 'Compilation error' };
+    }
+    if (statusId === 5) {
+      return { done: true, status: 'TLE', executionTime: parseFloat(result.time) || 0, details: 'Time limit exceeded' };
+    }
+    if (statusId >= 7) {
+      const msg = result.stderr || result.message || result.status?.description || 'Runtime error';
+      return { done: true, status: 'RE', executionTime: parseFloat(result.time) || 0, details: msg };
+    }
   }
 
   const actual = (result.stdout || '').trim();

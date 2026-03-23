@@ -22,16 +22,18 @@ app.set('trust proxy', 1);
 app.use(helmet());
 app.use(compression());
 
-const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:3000')
-  .split(',')
-  .map((o) => o.trim());
+const corsOriginEnv = process.env.CORS_ORIGIN || '';
+const allowedOrigins = corsOriginEnv
+  ? corsOriginEnv.split(',').map((o) => o.trim())
+  : [];
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      console.warn(`[CORS] Blocked request from origin: ${origin}`);
+      callback(null, false);
     }
   },
   credentials: true,

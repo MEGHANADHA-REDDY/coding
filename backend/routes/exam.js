@@ -23,7 +23,6 @@ router.post('/:examId/start', validateExamId, examStartLimiter, examController.s
 router.get('/:examId/problems', validateExamId, examController.getExamProblems);
 router.post('/:examId/advance-section', validateExamId, examController.advanceSection);
 router.post('/:examId/violations', validateExamId, validateViolation, examController.reportViolation);
-router.post('/:examId/quiz-submit', validateExamId, examController.submitQuiz);
 router.post('/:examId/auto-submit', validateExamId, examController.autoSubmitExam);
 
 module.exports = router;

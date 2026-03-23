@@ -29,19 +29,10 @@ router.get('/problems/filters', adminController.getProblemFilters);
 router.get('/problems/:id', validateMongoId, adminController.getProblemById);
 router.put('/problems/:id', validateMongoId, adminController.updateProblem);
 
-// Quizzes
-router.post('/quizzes', adminController.createQuiz);
-router.get('/quizzes', adminController.getQuizzes);
-router.get('/quizzes/:id', validateMongoId, adminController.getQuizById);
-router.put('/quizzes/:id', validateMongoId, adminController.updateQuiz);
-router.delete('/quizzes/:id', validateMongoId, adminController.deleteQuiz);
-
 // Exams
 router.post('/exams', validateExam, adminController.createExam);
 router.get('/exams', adminController.getExams);
-router.get('/exams/:id', validateMongoId, adminController.getExamById);
 router.put('/exams/:id', validateMongoId, adminController.updateExam);
-router.post('/exams/:examId/reset/:studentId', adminController.resetStudentExam);
 
 // Submissions & Violations
 router.get('/submissions', adminController.getSubmissions);

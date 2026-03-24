@@ -145,31 +145,48 @@ async function evaluateViaBatch(code, languageId, hiddenTestCases) {
   const tokens = batchResponse.map((r) => r.token);
   const results = await pollBatchResults(tokens);
 
+  const total = hiddenTestCases.length;
+  const maxScore = hiddenTestCases.reduce((s, tc) => s + (tc.score || 1), 0);
+  let passed = 0;
+  let score = 0;
   let totalTime = 0;
+
   for (let i = 0; i < results.length; i++) {
     const p = processResult(results[i], i, hiddenTestCases[i].output);
-    if (p.done) return p;
+    if (p.done) {
+      return { ...p, score, maxScore, passedTestCases: passed, totalTestCases: total };
+    }
     totalTime += p.time;
+    passed++;
+    score += (hiddenTestCases[i].score || 1);
   }
 
-  return { status: 'AC', executionTime: Math.round(totalTime * 1000) / 1000, details: `All ${hiddenTestCases.length} test cases passed` };
+  return { status: 'AC', executionTime: Math.round(totalTime * 1000) / 1000, details: `All ${total} test cases passed`, score: maxScore, maxScore, passedTestCases: total, totalTestCases: total };
 }
 
 // ── Evaluate via sequential singles (compatible with all versions) ──
 
 async function evaluateViaSequential(code, languageId, hiddenTestCases) {
+  const total = hiddenTestCases.length;
+  const maxScore = hiddenTestCases.reduce((s, tc) => s + (tc.score || 1), 0);
+  let passed = 0;
+  let score = 0;
   let totalTime = 0;
 
-  for (let i = 0; i < hiddenTestCases.length; i++) {
+  for (let i = 0; i < total; i++) {
     const tc = hiddenTestCases[i];
     const token = await submitSingle(code, languageId, tc.input || '');
     const result = await pollSingleResult(token);
     const p = processResult(result, i, tc.output);
-    if (p.done) return p;
+    if (p.done) {
+      return { ...p, score, maxScore, passedTestCases: passed, totalTestCases: total };
+    }
     totalTime += p.time;
+    passed++;
+    score += (tc.score || 1);
   }
 
-  return { status: 'AC', executionTime: Math.round(totalTime * 1000) / 1000, details: `All ${hiddenTestCases.length} test cases passed` };
+  return { status: 'AC', executionTime: Math.round(totalTime * 1000) / 1000, details: `All ${total} test cases passed`, score: maxScore, maxScore, passedTestCases: total, totalTestCases: total };
 }
 
 // ── Auto-detect batch support on first call ──

@@ -74,6 +74,10 @@ exports.submitCode = async (req, res) => {
         studentId,
         selectedAnswer: selectedAnswer.toLowerCase(),
         status: isCorrect ? 'AC' : 'WA',
+        score: isCorrect ? 1 : 0,
+        maxScore: 1,
+        passedTestCases: isCorrect ? 1 : 0,
+        totalTestCases: 1,
       });
 
       return res.json({

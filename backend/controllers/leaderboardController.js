@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const Submission = require('../models/Submission');
 const Exam = require('../models/Exam');
 const Problem = require('../models/Problem');
+const ExamSession = require('../models/ExamSession');
 const User = require('../models/User');
 
 async function computeMaxScores(exam) {
@@ -25,13 +26,24 @@ async function computeMaxScores(exam) {
   return { codingMaxScore, mcqMaxScore, maxPossibleScore: codingMaxScore + mcqMaxScore };
 }
 
-async function buildLeaderboard(examId) {
-  const codingScores = await Submission.aggregate([
+async function buildLeaderboard(examId, startedStudentIds) {
+  const submissionScores = await Submission.aggregate([
     { $match: { examId: new mongoose.Types.ObjectId(examId) } },
+    // Ensure "$first" corresponds to the highest score attempt for each problem.
     { $sort: { score: -1, createdAt: 1 } },
+    {
+      $lookup: {
+        from: 'problems',
+        localField: 'problemId',
+        foreignField: '_id',
+        as: 'problem',
+      },
+    },
+    { $unwind: '$problem' },
     {
       $group: {
         _id: { studentId: '$studentId', problemId: '$problemId' },
+        type: { $first: '$problem.type' }, // "coding" or "mcq"
         bestScore: { $max: '$score' },
         executionTime: { $first: '$executionTime' },
         status: { $first: '$status' },
@@ -40,7 +52,12 @@ async function buildLeaderboard(examId) {
     {
       $group: {
         _id: '$_id.studentId',
-        codingScore: { $sum: '$bestScore' },
+        codingScore: {
+          $sum: { $cond: [{ $eq: ['$type', 'coding'] }, '$bestScore', 0] },
+        },
+        quizScore: {
+          $sum: { $cond: [{ $eq: ['$type', 'mcq'] }, '$bestScore', 0] },
+        },
         solvedCount: {
           $sum: { $cond: [{ $eq: ['$status', 'AC'] }, 1, 0] },
         },
@@ -49,12 +66,15 @@ async function buildLeaderboard(examId) {
     },
   ]);
 
-  const codingMap = {};
-  codingScores.forEach((c) => {
-    codingMap[c._id.toString()] = c;
+  const scoreMap = {};
+  submissionScores.forEach((row) => {
+    scoreMap[row._id.toString()] = row;
   });
 
-  const allStudentIds = new Set(Object.keys(codingMap));
+  const allStudentIds = new Set([
+    ...(startedStudentIds || []).map((id) => id.toString()),
+    ...Object.keys(scoreMap),
+  ]);
 
   const users = await User.find({
     _id: { $in: Array.from(allStudentIds) },
@@ -68,24 +88,28 @@ async function buildLeaderboard(examId) {
   });
 
   const leaderboard = Array.from(allStudentIds).map((sid) => {
-    const coding = codingMap[sid] || { codingScore: 0, solvedCount: 0, totalTime: 0 };
+    const scores = scoreMap[sid] || { codingScore: 0, quizScore: 0, solvedCount: 0, totalTime: 0 };
     const user = userMap[sid];
+    const codingScore = scores.codingScore || 0;
+    const quizScore = scores.quizScore || 0;
+    const totalScore = codingScore + quizScore;
     return {
       studentId: sid,
       name: user?.name || 'Unknown',
       rollNumber: user?.rollNumber || '',
       email: user?.email || '',
-      codingScore: coding.codingScore || 0,
-      totalScore: coding.codingScore || 0,
-      solvedCount: coding.solvedCount || 0,
-      totalTime: Math.round((coding.totalTime || 0) * 1000) / 1000,
+      codingScore,
+      quizScore,
+      totalScore,
+      solvedCount: scores.solvedCount || 0,
+      totalTime: Math.round((scores.totalTime || 0) * 1000) / 1000,
     };
   });
 
   leaderboard.sort((a, b) => {
     if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
     if (b.solvedCount !== a.solvedCount) return b.solvedCount - a.solvedCount;
-    return a.totalTime - b.totalTime;
+    return a.totalTime - b.totalTime; // faster is better
   });
 
   return leaderboard;
@@ -101,7 +125,9 @@ exports.getLeaderboard = async (req, res) => {
     }
 
     const { codingMaxScore, mcqMaxScore, maxPossibleScore } = await computeMaxScores(exam);
-    const leaderboard = await buildLeaderboard(examId);
+    // Include students who started the exam, even if they have 0 submissions.
+    const startedStudentIds = await ExamSession.find({ examId }).distinct('studentId');
+    const leaderboard = await buildLeaderboard(examId, startedStudentIds);
 
     const ranked = leaderboard.map((entry, index) => ({
       rank: index + 1,
@@ -131,7 +157,8 @@ exports.exportLeaderboardCSV = async (req, res) => {
     }
 
     const { maxPossibleScore } = await computeMaxScores(exam);
-    const leaderboard = await buildLeaderboard(examId);
+    const startedStudentIds = await ExamSession.find({ examId }).distinct('studentId');
+    const leaderboard = await buildLeaderboard(examId, startedStudentIds);
 
     let csv = `Rank,Name,Roll Number,Email,Score,Max Score,Problems Solved,Total Time (s)\n`;
     leaderboard.forEach((entry, index) => {
@@ -150,4 +177,7 @@ exports.exportLeaderboardCSV = async (req, res) => {
   }
 };
 
-exports.getLeaderboardData = buildLeaderboard;
+exports.getLeaderboardData = async (examId) => {
+  const startedStudentIds = await ExamSession.find({ examId }).distinct('studentId');
+  return buildLeaderboard(examId, startedStudentIds);
+};

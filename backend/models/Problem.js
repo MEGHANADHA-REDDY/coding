@@ -30,6 +30,14 @@ const problemSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    inputFormat: {
+      type: String,
+      default: '',
+    },
+    outputFormat: {
+      type: String,
+      default: '',
+    },
     difficulty: {
       type: String,
       enum: ['easy', 'medium', 'hard'],

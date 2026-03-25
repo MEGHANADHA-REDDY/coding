@@ -146,7 +146,7 @@ exports.getExamProblems = async (req, res) => {
 
     const problemIds = assignedSection.problems;
     const problems = await Problem.find({ _id: { $in: problemIds } })
-      .select('title description constraints difficulty type sampleTestCases options boilerplateCode')
+      .select('title description constraints inputFormat outputFormat difficulty type sampleTestCases options boilerplateCode')
       .lean();
 
     const sections = exam.sections.map((s, i) => ({

@@ -18,6 +18,8 @@ export default function CreateProblemPage() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [constraints, setConstraints] = useState('');
+  const [inputFormat, setInputFormat] = useState('');
+  const [outputFormat, setOutputFormat] = useState('');
   const [difficulty, setDifficulty] = useState('easy');
   const [company, setCompany] = useState('');
   const [level, setLevel] = useState('');
@@ -62,6 +64,8 @@ export default function CreateProblemPage() {
 
       if (type === 'coding') {
         payload.constraints = constraints;
+        payload.inputFormat = inputFormat;
+        payload.outputFormat = outputFormat;
         payload.boilerplateCode = boilerplateCode;
         payload.sampleTestCases = sampleTestCases;
         payload.hiddenTestCases = hiddenTestCases;
@@ -178,6 +182,26 @@ export default function CreateProblemPage() {
               <label className="block text-sm font-medium text-gray-700 mb-1">Constraints</label>
               <textarea value={constraints} onChange={(e) => setConstraints(e.target.value)} rows={2}
                 className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Input Format (shown to students)</label>
+              <textarea
+                value={inputFormat}
+                onChange={(e) => setInputFormat(e.target.value)}
+                rows={3}
+                placeholder={"Line 1: Space-separated array elements\nLine 2: Target value"}
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Output Format (shown to students)</label>
+              <textarea
+                value={outputFormat}
+                onChange={(e) => setOutputFormat(e.target.value)}
+                rows={2}
+                placeholder={"Print Found if present, else Not Found"}
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
+              />
             </div>
 
             <div>

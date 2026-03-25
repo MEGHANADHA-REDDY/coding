@@ -13,6 +13,8 @@ exports.validateProblem = [
   body('company').optional().trim(),
   body('level').optional().trim(),
   body('boilerplateCode').optional(),
+  body('inputFormat').optional(),
+  body('outputFormat').optional(),
   body('sampleTestCases').optional().isArray(),
   body('sampleTestCases.*.input').optional({ values: 'falsy' }),
   body('sampleTestCases.*.output').optional(),

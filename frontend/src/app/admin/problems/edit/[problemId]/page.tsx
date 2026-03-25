@@ -34,6 +34,8 @@ export default function EditProblemPage() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [constraints, setConstraints] = useState('');
+  const [inputFormat, setInputFormat] = useState('');
+  const [outputFormat, setOutputFormat] = useState('');
   const [difficulty, setDifficulty] = useState('easy');
   const [company, setCompany] = useState('');
   const [level, setLevel] = useState('');
@@ -58,6 +60,8 @@ export default function EditProblemPage() {
       setTitle(p.title || '');
       setDescription(p.description || '');
       setConstraints(p.constraints || '');
+      setInputFormat(p.inputFormat || '');
+      setOutputFormat(p.outputFormat || '');
       setDifficulty(p.difficulty || 'easy');
       setCompany(p.company || '');
       setLevel(p.level || '');
@@ -123,6 +127,8 @@ export default function EditProblemPage() {
           return;
         }
         payload.constraints = constraints;
+        payload.inputFormat = inputFormat;
+        payload.outputFormat = outputFormat;
         payload.boilerplateCode = boilerplateCode;
         payload.sampleTestCases = samples;
         payload.hiddenTestCases = hidden;
@@ -137,6 +143,8 @@ export default function EditProblemPage() {
         };
         payload.correctAnswer = correctAnswer;
         payload.constraints = '';
+        payload.inputFormat = '';
+        payload.outputFormat = '';
         payload.boilerplateCode = '';
         payload.sampleTestCases = [];
         payload.hiddenTestCases = [];
@@ -299,6 +307,26 @@ export default function EditProblemPage() {
                 value={constraints}
                 onChange={(e) => setConstraints(e.target.value)}
                 rows={2}
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Input Format (shown to students)</label>
+              <textarea
+                value={inputFormat}
+                onChange={(e) => setInputFormat(e.target.value)}
+                rows={3}
+                placeholder={"Line 1: Space-separated array elements\nLine 2: Target value"}
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Output Format (shown to students)</label>
+              <textarea
+                value={outputFormat}
+                onChange={(e) => setOutputFormat(e.target.value)}
+                rows={2}
+                placeholder={"Print Found if present, else Not Found"}
                 className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
               />
             </div>

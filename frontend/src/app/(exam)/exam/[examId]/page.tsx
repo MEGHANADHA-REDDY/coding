@@ -13,6 +13,8 @@ interface Problem {
   title: string;
   description: string;
   constraints: string;
+  inputFormat?: string;
+  outputFormat?: string;
   difficulty: string;
   type: string;
   boilerplateCode?: string;
@@ -371,6 +373,18 @@ export default function ExamPage() {
                 <div className="mt-4">
                   <h3 className="text-sm font-semibold text-gray-200 mb-1">Constraints</h3>
                   <div className="whitespace-pre-wrap text-gray-400 text-sm">{problem.constraints}</div>
+                </div>
+              )}
+              {!isMCQ && problem.inputFormat && (
+                <div className="mt-4">
+                  <h3 className="text-sm font-semibold text-gray-200 mb-1">Input Format</h3>
+                  <div className="whitespace-pre-wrap text-gray-400 text-sm">{problem.inputFormat}</div>
+                </div>
+              )}
+              {!isMCQ && problem.outputFormat && (
+                <div className="mt-4">
+                  <h3 className="text-sm font-semibold text-gray-200 mb-1">Output Format</h3>
+                  <div className="whitespace-pre-wrap text-gray-400 text-sm">{problem.outputFormat}</div>
                 </div>
               )}
 

@@ -27,7 +27,7 @@ router.post('/problems/bulk', upload.single('file'), adminController.bulkUploadP
 router.get('/problems', adminController.getProblems);
 router.get('/problems/filters', adminController.getProblemFilters);
 router.get('/problems/:id', validateMongoId, adminController.getProblemById);
-router.put('/problems/:id', validateMongoId, adminController.updateProblem);
+router.put('/problems/:id', validateMongoId, validateProblem, adminController.updateProblem);
 
 // Exams
 router.post('/exams', validateExam, adminController.createExam);

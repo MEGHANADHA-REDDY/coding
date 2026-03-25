@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
-import { Plus, FileCode, Upload, Filter } from 'lucide-react';
+import { Plus, FileCode, Upload, Filter, Pencil } from 'lucide-react';
 
 interface Problem {
   _id: string;
@@ -170,6 +170,7 @@ export default function ProblemsPage() {
                 <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Level</th>
                 <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Created By</th>
                 <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Date</th>
+                <th className="text-right px-6 py-3 text-xs font-medium text-gray-500 uppercase">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
@@ -190,6 +191,15 @@ export default function ProblemsPage() {
                   <td className="px-6 py-4 text-sm text-gray-500">{problem.level || '-'}</td>
                   <td className="px-6 py-4 text-sm text-gray-500">{problem.createdBy?.name}</td>
                   <td className="px-6 py-4 text-sm text-gray-500">{new Date(problem.createdAt).toLocaleDateString()}</td>
+                  <td className="px-6 py-4 text-right">
+                    <Link
+                      href={`/admin/problems/edit/${problem._id}`}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      Edit
+                    </Link>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -201,7 +211,7 @@ export default function ProblemsPage() {
         <div className="p-4 bg-blue-50 rounded-xl border border-blue-100">
           <p className="text-sm text-blue-700">
             <strong>Coding CSV columns:</strong>{' '}
-            <code className="bg-blue-100 px-1 rounded">title, description, difficulty, company, level, sampleInput, sampleOutput, hiddenInput, hiddenOutput, boilerplateCode</code>
+            <code className="bg-blue-100 px-1 rounded">title, description, difficulty, company, level, sampleinput, sampleoutput, hiddeninput, hiddenoutput, boilerplatecode</code>
             <br />
             For multiple test cases use: <code className="bg-blue-100 px-1 rounded">hiddenInput1, hiddenOutput1, hiddenInput2, hiddenOutput2, ...</code>
           </p>

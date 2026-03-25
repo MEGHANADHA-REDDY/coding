@@ -25,7 +25,7 @@ exports.validateProblem = [
   body('options.c').optional(),
   body('options.d').optional(),
   body('correctAnswer')
-    .optional()
+    .optional({ values: 'falsy' })
     .isIn(['a', 'b', 'c', 'd'])
     .withMessage('Correct answer must be a, b, c, or d'),
 ];

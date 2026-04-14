@@ -9,6 +9,7 @@ const router = express.Router();
 router.use(auth, requireRole('student'));
 
 router.post('/', validateSubmission, submissionController.submitCode);
+router.post('/run', submissionController.runCode);
 router.get('/exam/:examId', validateExamId, submissionController.getSubmissionHistory);
 
 module.exports = router;

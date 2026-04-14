@@ -3,7 +3,7 @@ const Exam = require('../models/Exam');
 const ExamSession = require('../models/ExamSession');
 const Problem = require('../models/Problem');
 const Submission = require('../models/Submission');
-const { evaluateSubmission } = require('../services/judge0');
+const { evaluateSubmission, runCode } = require('../services/judge0');
 
 exports.submitCode = async (req, res) => {
   try {
@@ -147,6 +147,26 @@ exports.submitCode = async (req, res) => {
   } catch (error) {
     console.error('Submit code error:', error);
     res.status(500).json({ error: 'Failed to submit code.' });
+  }
+};
+
+// Run code against a custom stdin — no DB save, no exam validation
+exports.runCode = async (req, res) => {
+  try {
+    const { language, code, stdin } = req.body;
+
+    if (!language || !code) {
+      return res.status(400).json({ error: 'language and code are required.' });
+    }
+    if (!['python', 'java'].includes(language)) {
+      return res.status(400).json({ error: 'Language must be python or java.' });
+    }
+
+    const result = await runCode(code, language, stdin || '');
+    res.json(result);
+  } catch (error) {
+    console.error('Run code error:', error.message);
+    res.status(500).json({ error: error.message || 'Code execution failed.' });
   }
 };
 

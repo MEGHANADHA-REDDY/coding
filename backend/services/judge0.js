@@ -258,4 +258,33 @@ const mapStatus = (statusId) => {
   }
 };
 
-module.exports = { evaluateSubmission, mapStatus, getQueueStats };
+// ── Run against arbitrary stdin (used by the "Run" button — no DB save) ──
+
+async function runCode(code, language, stdin) {
+  const langIds = getLanguageIds();
+  const languageId = langIds[language];
+  if (!languageId) throw new Error(`Unsupported language: ${language}`);
+
+  const token = await submitSingle(code, languageId, stdin || '');
+  const result = await pollSingleResult(token);
+  const statusId = result.status?.id;
+
+  let status = 'OK';
+  if (statusId === 6) status = 'CE';
+  else if (statusId === 5) status = 'TLE';
+  else if (statusId >= 7) status = 'RE';
+  else if (statusId === 3) status = 'OK';
+  else if (statusId === 4) status = 'OK'; // stdout just differs — still show output
+
+  return {
+    status,
+    stdout: result.stdout || '',
+    stderr: result.stderr || '',
+    compileOutput: result.compile_output || '',
+    executionTime: parseFloat(result.time) || 0,
+    memory: result.memory || 0,
+    statusDescription: result.status?.description || '',
+  };
+}
+
+module.exports = { evaluateSubmission, runCode, mapStatus, getQueueStats };
